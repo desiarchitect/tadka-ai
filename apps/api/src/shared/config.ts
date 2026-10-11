@@ -6,6 +6,11 @@ const env = z.object({
   PORT: z.coerce.number().default(3000),
   // Optional Ed25519 private key as a JWK JSON string. Unset = a fresh dev key per process.
   JWT_PRIVATE_JWK: z.string().optional(),
+  // Both set: POST /assist/intent uses the Foundry model. Otherwise it uses the keyword rules.
+  AZURE_RESOURCE_NAME: z.string().optional(),
+  AZURE_API_KEY: z.string().optional(),
+  AZURE_DEPLOYMENT: z.string().optional(),
+  M0_BUDGET_USD: z.coerce.number().default(5),
 });
 
 export type Config = z.infer<typeof env>;

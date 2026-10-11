@@ -2,7 +2,7 @@
 // orders, an owner sees only their restaurant's orders (without the delivery address or
 // phone), an Admin sees all. An order the caller may not see is reported as not found,
 // so its existence doesn't leak.
-import { and, desc, eq, type SQL } from 'drizzle-orm';
+import { and, desc, eq, notInArray, type SQL } from 'drizzle-orm';
 import type { Db } from '../shared/db.js';
 import { ConflictError, NotFoundError } from '../shared/errors.js';
 import type { Principal } from '../shared/principal.js';
@@ -19,6 +19,16 @@ export class OrdersService {
   list(p: Principal) {
     return inSpan('orders.list', { 'tadka.role': p.role }, async () => {
       const rows = await this.db.select().from(orders).where(scopeFor(p)).orderBy(desc(orders.createdAt));
+      return rows.map((o) => view(p, o));
+    });
+  }
+
+  // Orders that are still in progress (not Delivered, not Cancelled), newest first.
+  listActive(p: Principal) {
+    return inSpan('orders.listActive', { 'tadka.role': p.role }, async () => {
+      const rows = await this.db.select().from(orders)
+        .where(and(scopeFor(p), notInArray(orders.status, ['Delivered', 'Cancelled'])))
+        .orderBy(desc(orders.createdAt));
       return rows.map((o) => view(p, o));
     });
   }

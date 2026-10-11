@@ -2,7 +2,11 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
 import { IdentityService } from './identity/service.js';
+import type { LanguageModel } from 'ai';
+import { runTurn, type LoopConfig } from './assist/agent-loop.js';
+import type { BudgetLedger } from './assist/budget.js';
 import { rulesClassifier, type IntentClassifier } from './assist/classifiers.js';
+import type { SecurityAudit } from './assist/tools/audit.js';
 import { registerAssistRoutes } from './assist/routes.js';
 import { OrdersService } from './orders/service.js';
 import type { PaymentProvider } from './payments/provider.js';
@@ -12,7 +16,8 @@ import type { Db } from './shared/db.js';
 import { UnauthorizedError } from './shared/errors.js';
 import type { Principal } from './shared/principal.js';
 
-export type AppDeps = { db: Db; keys: SigningKeys; provider: PaymentProvider; classify?: IntentClassifier };
+export type AssistantDeps = { model: LanguageModel; ledger: BudgetLedger; config: LoopConfig; audit: SecurityAudit };
+export type AppDeps = { db: Db; keys: SigningKeys; provider: PaymentProvider; classify?: IntentClassifier; assistant?: AssistantDeps };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } });
@@ -55,7 +60,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get('/orders/:id', async (req) => orders.get(await principal(req), parse(idParam, req.params).id));
   app.post('/orders/:id/pay', async (req) => orders.pay(await principal(req), parse(idParam, req.params).id));
 
-  registerAssistRoutes(app, { orders, principal, parse, classify: deps.classify ?? rulesClassifier });
+  const a = deps.assistant;
+  const chat = a && ((p: Principal, text: string) => runTurn({
+    model: a.model, ledger: a.ledger, config: a.config,
+    executor: { orders, restaurants, audit: a.audit, log: (line) => app.log.info(line) },
+    log: (e) => app.log.warn(e),
+  }, p, text));
+  registerAssistRoutes(app, { orders, principal, parse, classify: deps.classify ?? rulesClassifier, chat });
 
   return app;
 }

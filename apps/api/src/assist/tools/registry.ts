@@ -5,7 +5,6 @@ import { z } from 'zod';
 import type { OrdersService } from '../../orders/service.js';
 import type { RestaurantsService } from '../../restaurants/service.js';
 import type { Principal } from '../../shared/principal.js';
-import type { Role } from '../../shared/schema.js';
 import { MENU_LIMIT, ORDERS_LIMIT, menuView, orderView, type ToolData } from './views.js';
 
 export type ToolServices = { orders: OrdersService; restaurants: RestaurantsService };
@@ -13,7 +12,7 @@ export type ToolServices = { orders: OrdersService; restaurants: RestaurantsServ
 type ToolDef = {
   description: string;
   input: z.ZodObject;
-  roles: readonly Role[];
+  roles: readonly Principal['role'][];
   sideEffect: 'read'; // EP6 adds tools that change things, behind an approval step
   run: (s: ToolServices, p: Principal, input: never) => Promise<ToolData>;
 };

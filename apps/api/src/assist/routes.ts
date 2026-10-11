@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { OrdersService } from '../orders/service.js';
 import { ForbiddenError, UpstreamError } from '../shared/errors.js';
 import type { Principal } from '../shared/principal.js';
+import type { TurnResult } from './agent-loop.js';
 import type { IntentClassifier } from './classifiers.js';
 import { FALLBACK, nextStep } from './next-step.js';
 
@@ -13,10 +14,11 @@ type Deps = {
   principal: (req: FastifyRequest) => Promise<Principal>;
   parse: <T>(schema: z.ZodType<T>, v: unknown) => T;
   classify: IntentClassifier;
+  chat?: (p: Principal, text: string) => Promise<TurnResult>;
 };
 
 const orderStatusQuery = z.object({ orderId: z.uuid() });
-const intentBody = z.strictObject({ text: z.string().trim().min(1).max(500) });
+const textBody = z.strictObject({ text: z.string().trim().min(1).max(500) });
 
 export function registerAssistRoutes(app: FastifyInstance, deps: Deps) {
   // No LLM here. A structured request ("status of order X") is answered by plain code:
@@ -35,10 +37,22 @@ export function registerAssistRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/assist/intent', async (req) => {
     const p = await deps.principal(req);
     if (p.role !== 'Customer') throw new ForbiddenError('customers_only');
-    const { text } = deps.parse(intentBody, req.body);
+    const { text } = deps.parse(textBody, req.body);
     const r = await deps.classify(text);
     if (r.outcome === 'provider_error') throw new UpstreamError('assistant_unavailable');
     if (r.outcome !== 'ok') return { outcome: r.outcome, classifier: r.classifier, next: FALLBACK };
     return { outcome: 'ok', classifier: r.classifier, intent: r.intent, next: await nextStep(p, r.intent, deps.orders) };
+  });
+
+  // EP2: one question, answered with tools. The model chooses tools and which results answer
+  // the question; the executor runs them with the verified Principal; the reply is rendered
+  // from templates. Single turn, nothing stored (conversation memory is EP3). Customers only.
+  app.post('/assist/chat', async (req) => {
+    const p = await deps.principal(req);
+    if (p.role !== 'Customer') throw new ForbiddenError('customers_only');
+    const { text } = deps.parse(textBody, req.body);
+    if (!deps.chat) throw Object.assign(new Error('assistant_not_configured'), { status: 503 });
+    const r = await deps.chat(p, text);
+    return { answer: r.answer, stopReason: r.stopReason, steps: r.steps };
   });
 }

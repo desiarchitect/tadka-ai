@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { APICallError } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import type { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOOP, estimateRequest, runTurn, type LoopConfig, type LoopDeps, type LoopEvent } from '../src/assist/agent-loop.js';
 import { BudgetLedger } from '../src/assist/budget.js';
@@ -12,6 +12,7 @@ import { CLARIFY, FAILED, FALLBACK, NOT_FOUND } from '../src/assist/templates.js
 import { memoryAudit } from '../src/assist/tools/audit.js';
 import type { ExecutorDeps } from '../src/assist/tools/executor.js';
 import { NotFoundError } from '../src/shared/errors.js';
+import { present, scripted, type Step } from './fake-model.js';
 import type { Principal } from '../src/shared/principal.js';
 
 const rahul: Principal = { userId: '11111111-1111-4111-8111-111111111111', role: 'Customer' };
@@ -19,27 +20,6 @@ const id = (n: number) => `0000000${n}-0000-4000-8000-000000000000`;
 const OWN = id(1), OWN2 = id(2), OWN3 = id(3), FOREIGN = id(8), INVENTED = id(9), BROKEN = id(7);
 const REST = 'aaaaaaaa-0000-4000-8000-000000000001';
 const order = (orderId: string, status = 'Preparing') => ({ id: orderId, restaurantId: REST, status, totalPaise: 59800, createdAt: new Date('2026-10-01T12:00:00Z') });
-
-// ---- a scripted model: each entry is one step's tool calls, text, or a function ----
-type Step = { calls?: [string, unknown, string?][]; text?: string; finish?: string; usage?: { in?: number; out?: number }; delayMs?: number; throws?: Error };
-const usageOf = (u: Step['usage'] = { in: 100, out: 20 }) => ({
-  inputTokens: { total: u.in, noCache: u.in, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: u.out, text: u.out, reasoning: 0 },
-});
-function scripted(steps: Step[]) {
-  let i = 0;
-  return new MockLanguageModelV4({
-    doGenerate: async (opts) => {
-      const s = steps[Math.min(i++, steps.length - 1)]!;
-      if (s.delayMs) await new Promise((r, j) => { const t = setTimeout(r, s.delayMs); opts.abortSignal?.addEventListener('abort', () => { clearTimeout(t); j(new Error('aborted')); }); });
-      if (s.throws) throw s.throws;
-      const content = s.calls
-        ? s.calls.map(([toolName, input, callId], k) => ({ type: 'tool-call' as const, toolCallId: callId ?? `call_${i}_${k}`, toolName, input: typeof input === 'string' ? input : JSON.stringify(input) }))
-        : [{ type: 'text' as const, text: s.text ?? '' }];
-      return { content, finishReason: { unified: (s.finish ?? (s.calls ? 'tool-calls' : 'stop')) as 'stop', raw: 'x' }, usage: usageOf(s.usage), warnings: [] };
-    },
-  });
-}
-const present = (...resultIds: string[]): [string, unknown] => ['final_answer', { kind: 'present', resultIds, clarifyReason: 'none' }];
 
 // ---- in-memory services ----
 function services(opts: { delay?: (orderId: string) => number; onCall?: () => () => void } = {}) {

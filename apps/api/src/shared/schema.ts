@@ -1,12 +1,13 @@
 // One Postgres database, one schema per module. No foreign keys cross a schema:
 // modules refer to each other by ID only, so a module can move out later.
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 export const identity = pgSchema('identity');
 export const restaurant = pgSchema('restaurant');
 export const ordering = pgSchema('ordering');
 export const payment = pgSchema('payment');
+export const assist = pgSchema('assist');
 
 export const users = identity.table('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -41,6 +42,7 @@ export const menuItems = restaurant.table('menu_items', {
   restaurantId: uuid('restaurant_id').notNull().references(() => restaurants.id),
   name: text('name').notNull(),
   pricePaise: integer('price_paise').notNull(),
+  isVeg: boolean('is_veg').notNull().default(false),
 }, (t) => [check('menu_items_price_ck', sql`${t.pricePaise} > 0`)]);
 
 export const ORDER_STATUSES = ['Placed', 'Confirmed', 'Preparing', 'OutForDelivery', 'Delivered', 'Cancelled'] as const;
@@ -91,3 +93,47 @@ export const payments = payment.table('payments', {
   check('payments_amounts_ck', sql`${t.capturedPaise} >= 0 and ${t.refundedPaise} >= 0 and ${t.reservedPaise} >= 0
     and ${t.capturedPaise} <= ${t.amountPaise} and ${t.refundedPaise} + ${t.reservedPaise} <= ${t.capturedPaise}`),
 ]);
+
+// EP3: conversations the assistant remembers. Owned by a user (by ID only, no foreign key
+// into identity). `version` serializes turns: a turn only commits if nobody else did first.
+export const conversations = assist.table('conversations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull(),
+  version: integer('version').notNull().default(0),
+  turnCount: integer('turn_count').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastMessageAt: timestamp('last_message_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('conversations_user_ix').on(t.userId, t.lastMessageAt)]);
+
+// What the customer saw, one row per turn.
+export const turns = assist.table('turns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  turnNo: integer('turn_no').notNull(),
+  userText: text('user_text').notNull(),
+  answer: text('answer').notNull(),
+  stopReason: text('stop_reason').notNull(),
+  steps: jsonb('steps').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [unique('turns_conversation_turn_uq').on(t.conversationId, t.turnNo)]);
+
+// The exact model messages of each turn, so the next turn can send them again. Kept and
+// dropped by whole turn, so a tool call never loses its result.
+export const messages = assist.table('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  turnNo: integer('turn_no').notNull(),
+  seq: integer('seq').notNull(),
+  content: jsonb('content').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [unique('messages_conversation_seq_uq').on(t.conversationId, t.seq)]);
+
+// Long-term memory: allow-listed preferences the customer set themselves.
+export const MEMORY_KINDS = { diet: ['vegetarian'] } as const;
+export const memories = assist.table('memories', {
+  userId: uuid('user_id').notNull(),
+  kind: text('kind').notNull(),
+  value: text('value').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.userId, t.kind] }), check('memories_kind_ck', sql`${t.kind} = 'diet' and ${t.value} = 'vegetarian'`)]);

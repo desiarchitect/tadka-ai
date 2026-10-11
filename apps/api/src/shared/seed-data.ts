@@ -19,7 +19,7 @@ export const IDS = {
 } as const;
 
 export async function seed(db: Db) {
-  await db.execute(sql`truncate payment.payments, ordering.order_items, ordering.orders, restaurant.menu_items,
+  await db.execute(sql`truncate assist.messages, assist.turns, assist.conversations, assist.memories, payment.payments, ordering.order_items, ordering.orders, restaurant.menu_items,
     restaurant.restaurants, identity.refresh_tokens, identity.users cascade`);
 
   const passwordHash = await hashPassword(SEED_PASSWORD);
@@ -36,12 +36,12 @@ export async function seed(db: Db) {
     { id: IDS.biryaniHouse, name: 'Biryani House', city: 'Hyderabad' },
   ]);
   const menu = await db.insert(menuItems).values([
-    { restaurantId: IDS.spiceGarden, name: 'Paneer Butter Masala', pricePaise: 29900 },
-    { restaurantId: IDS.spiceGarden, name: 'Butter Naan', pricePaise: 4900 },
-    { restaurantId: IDS.chaiPoint, name: 'Masala Chai', pricePaise: 3900 },
-    { restaurantId: IDS.chaiPoint, name: 'Vada Pav', pricePaise: 2900 },
-    { restaurantId: IDS.biryaniHouse, name: 'Chicken Biryani', pricePaise: 34900 },
-    { restaurantId: IDS.biryaniHouse, name: 'Veg Biryani', pricePaise: 24900 },
+    { restaurantId: IDS.spiceGarden, name: 'Paneer Butter Masala', pricePaise: 29900, isVeg: true },
+    { restaurantId: IDS.spiceGarden, name: 'Butter Naan', pricePaise: 4900, isVeg: true },
+    { restaurantId: IDS.chaiPoint, name: 'Masala Chai', pricePaise: 3900, isVeg: true },
+    { restaurantId: IDS.chaiPoint, name: 'Vada Pav', pricePaise: 2900, isVeg: true },
+    { restaurantId: IDS.biryaniHouse, name: 'Chicken Biryani', pricePaise: 34900, isVeg: false },
+    { restaurantId: IDS.biryaniHouse, name: 'Veg Biryani', pricePaise: 24900, isVeg: true },
   ]).returning();
 
   // Each customer: one order per in-flight status, each with a captured payment.

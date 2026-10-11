@@ -1,0 +1,211 @@
+{
+  "version": "eval-1",
+  "note": "Frozen evaluation set: labels were fixed before the first comparison run. Synthetic messages. Do not tune the prompt or the rules on these.",
+  "messages": [
+    {
+      "text": "Mera order abhi tak nahi aaya, kab tak pahunchega?",
+      "expected": "order_status",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Where is my biryani? It has been an hour.",
+      "expected": "order_status",
+      "lang": "en"
+    },
+    {
+      "text": "cancel mat karna, bas status batao",
+      "expected": "order_status",
+      "lang": "hinglish",
+      "hard": true
+    },
+    {
+      "text": "Cancel? No, just tell me where it is.",
+      "expected": "order_status",
+      "lang": "en",
+      "hard": true
+    },
+    {
+      "text": "Order 40 minute se late hai yaar",
+      "expected": "order_status",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Can you check if my food has left the restaurant yet?",
+      "expected": "order_status",
+      "lang": "en"
+    },
+    {
+      "text": "rider kahan tak pahuncha?",
+      "expected": "order_status",
+      "lang": "hinglish"
+    },
+    {
+      "text": "I don't want to cancel or get a refund, I only want to know when it will arrive",
+      "expected": "order_status",
+      "lang": "en",
+      "hard": true
+    },
+    {
+      "text": "bhai khana kab aayega, bhookh lagi hai",
+      "expected": "order_status",
+      "lang": "hinglish"
+    },
+    {
+      "text": "What's the ETA on my Chai Point order?",
+      "expected": "order_status",
+      "lang": "en"
+    },
+    {
+      "text": "Can you cancel my order, please?",
+      "expected": "cancel_order",
+      "lang": "en"
+    },
+    {
+      "text": "mera order cancel kar dijiye",
+      "expected": "cancel_order",
+      "lang": "hinglish"
+    },
+    {
+      "text": "I ordered by mistake, don't send it",
+      "expected": "cancel_order",
+      "lang": "en"
+    },
+    {
+      "text": "galti se order ho gaya, mat bhejna",
+      "expected": "cancel_order",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Cancel kar do, bahut late ho gaya, ab nahi chahiye",
+      "expected": "cancel_order",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Stop my order, I changed my mind",
+      "expected": "cancel_order",
+      "lang": "en"
+    },
+    {
+      "text": "cancel my biryani order and cancel the chai too",
+      "expected": "cancel_order",
+      "lang": "en"
+    },
+    {
+      "text": "Kya main apna order cancel kar sakta hu?",
+      "expected": "cancel_order",
+      "lang": "hinglish"
+    },
+    {
+      "text": "I need my money returned, the curry was cold",
+      "expected": "refund_request",
+      "lang": "en"
+    },
+    {
+      "text": "paise wapas chahiye, biryani thandi thi",
+      "expected": "refund_request",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Please refund my last order",
+      "expected": "refund_request",
+      "lang": "en"
+    },
+    {
+      "text": "Mera refund kab milega?",
+      "expected": "refund_request",
+      "lang": "hinglish"
+    },
+    {
+      "text": "I was charged twice for the same order",
+      "expected": "refund_request",
+      "lang": "en"
+    },
+    {
+      "text": "do baar paise kat gaye",
+      "expected": "refund_request",
+      "lang": "hinglish"
+    },
+    {
+      "text": "The food was spoiled, I want compensation",
+      "expected": "refund_request",
+      "lang": "en"
+    },
+    {
+      "text": "order cancel karne ke baad bhi paisa nahi mila",
+      "expected": "refund_request",
+      "lang": "hinglish",
+      "hard": true
+    },
+    {
+      "text": "Is the dal makhani vegetarian?",
+      "expected": "menu_question",
+      "lang": "en"
+    },
+    {
+      "text": "kya biryani mein pyaaz hota hai?",
+      "expected": "menu_question",
+      "lang": "hinglish"
+    },
+    {
+      "text": "How spicy is the Chicken Tikka?",
+      "expected": "menu_question",
+      "lang": "en"
+    },
+    {
+      "text": "Spice Garden ka menu kya hai?",
+      "expected": "menu_question",
+      "lang": "hinglish"
+    },
+    {
+      "text": "kitne ka hai butter naan?",
+      "expected": "menu_question",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Do you have anything without nuts?",
+      "expected": "menu_question",
+      "lang": "en"
+    },
+    {
+      "text": "Chai Point mein kya kya milta hai",
+      "expected": "menu_question",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Namaste",
+      "expected": "other",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Thank you, the food was great!",
+      "expected": "other",
+      "lang": "en"
+    },
+    {
+      "text": "Can I change my delivery address?",
+      "expected": "other",
+      "lang": "en"
+    },
+    {
+      "text": "app crash ho raha hai",
+      "expected": "other",
+      "lang": "hinglish"
+    },
+    {
+      "text": "Thanks, my order was not late at all, great service!",
+      "expected": "other",
+      "lang": "en",
+      "hard": true
+    },
+    {
+      "text": "The rider was rude to me",
+      "expected": "other",
+      "lang": "en"
+    },
+    {
+      "text": "How do I delete my account?",
+      "expected": "other",
+      "lang": "en"
+    }
+  ]
+}

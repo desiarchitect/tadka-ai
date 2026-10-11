@@ -1,5 +1,6 @@
 node_modules/
 .env
 .m0-usage.json
+.eval-runs/
 *.log
 dist/

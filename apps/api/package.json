@@ -9,7 +9,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=../../.env --import tsx scripts/migrate.ts",
     "db:seed": "node --env-file-if-exists=../../.env --import tsx scripts/seed.ts",
-    "probe:llm": "node --env-file-if-exists=../../.env --import tsx scripts/probe-llm.ts"
+    "probe:llm": "node --env-file-if-exists=../../.env --import tsx scripts/probe-llm.ts",
+    "eval:intent": "node --env-file-if-exists=../../.env --import tsx scripts/eval-intent.ts"
   },
   "dependencies": {
     "@ai-sdk/azure": "4.0.99",

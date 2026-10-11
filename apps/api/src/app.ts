@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
 import { IdentityService } from './identity/service.js';
+import { registerAssistRoutes } from './assist/routes.js';
 import { OrdersService } from './orders/service.js';
 import type { PaymentProvider } from './payments/provider.js';
 import { PaymentsService } from './payments/service.js';
@@ -52,6 +53,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get('/orders', async (req) => orders.list(await principal(req)));
   app.get('/orders/:id', async (req) => orders.get(await principal(req), parse(idParam, req.params).id));
   app.post('/orders/:id/pay', async (req) => orders.pay(await principal(req), parse(idParam, req.params).id));
+
+  registerAssistRoutes(app, { orders, principal, parse });
 
   return app;
 }

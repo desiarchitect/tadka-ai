@@ -328,6 +328,7 @@ function Login($Email) { (Call POST /auth/login $null @{ email = $Email; passwor
 Call GET /health                                   # {"status":"ok"}
 Call GET /health $null $null 4010                  # the fake provider
 Call GET /restaurants
+Call GET /restaurants/aaaaaaaa-0000-4000-8000-000000000001/menu     # Spice Garden's items, prices in paise
 $RAHUL = Login rahul@tadka.test
 (Call GET /orders $RAHUL | ConvertFrom-Json).status -join ','      # Rahul's 5 orders
 
@@ -340,6 +341,7 @@ Call GET /orders                                   # {"error":"missing_token"} [
 # Roles see different things
 $OWNER = Login owner@tadka.test; $ADMIN = Login admin@tadka.test
 (Call GET /orders $OWNER | ConvertFrom-Json).Count     # 5
+((Call GET /orders $OWNER | ConvertFrom-Json)[0].PSObject.Properties.Name) -join ','   # no address or phone
 (Call GET /orders $ADMIN | ConvertFrom-Json).Count     # 9
 
 # Pay for an order (run it twice: same answer, one charge)

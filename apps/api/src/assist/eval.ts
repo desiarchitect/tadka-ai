@@ -3,7 +3,7 @@
 // correct answer and never hidden inside "other". Accuracy always divides by the full set.
 import { BudgetLedger, type PricedModel } from './budget.js';
 import { MAX_OUTPUT_TOKENS, type ClassifyResult } from './classifier.js';
-import { worstCaseChars } from './classifiers.js';
+import { worstCaseInputTokens } from './classifiers.js';
 import type { Intent } from './intent.js';
 
 export type EvalMessage = { text: string; expected: Intent; lang: 'en' | 'hinglish'; hard?: boolean };
@@ -16,21 +16,21 @@ export type EvalRow = {
 
 // Two limits, both checked BEFORE a request is sent: this run's own cap, and the shared
 // ledger's overall cap. The check uses actual spend so far plus a conservative worst case
-// for the NEXT request (every character counted as a token, plus the full output cap). If
+// for the NEXT request (the UTF-8 byte length counted as tokens, plus overhead and the full output cap). If
 // the next request could cross a limit, the run stops. It never retries.
 export class EvalBudget {
   private runSpent = 0;
   constructor(private readonly runCapUsd: number, private readonly priced: PricedModel, private readonly ledger?: BudgetLedger) {}
 
   worstCase(text: string): number {
-    return BudgetLedger.cost(this.priced, worstCaseChars(text), MAX_OUTPUT_TOKENS);
+    return BudgetLedger.cost(this.priced, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
   }
 
   /** Throws if sending this request could exceed the run cap or the ledger cap. */
   beforeSend(text: string): void {
     const worst = this.worstCase(text);
     if (this.runSpent + worst > this.runCapUsd) throw new Error(`run budget: spent $${this.runSpent.toFixed(6)} + worst case $${worst.toFixed(6)} exceeds $${this.runCapUsd}`);
-    this.ledger?.assertAffordable(this.priced, worstCaseChars(text), MAX_OUTPUT_TOKENS);
+    this.ledger?.assertAffordable(this.priced, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
   }
 
   /** Record actual usage after a response. Returns the cost. */

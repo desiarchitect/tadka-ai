@@ -18,9 +18,9 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - `OrdersService.listActive`: the caller's orders that are not Delivered or Cancelled.
 - `POST /assist/intent` uses the Foundry model when `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` are set, behind the spending ledger; otherwise it uses the keyword rules. The response says which one answered.
 - Evaluation: `pnpm eval:intent` over 40 frozen synthetic messages (19 Hinglish, 5 hard cases). A separate 8-message dev set is used for tuning. Failures count as wrong and are reported apart from a valid `other`. The dry run uses a stand-in model and checks the harness only; `--live` measures the real deployment and writes per-message results (outcome, tokens, cost, latency) to `.eval-runs/`.
-- Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed.
+- Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed. The worst case counts the UTF-8 byte length of the prompt as tokens (safe for Devanagari), adds a fixed overhead and the full output cap, prices input and output separately, and refuses a model with no configured price.
 - `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
-- Tests: 80 (72 API, 8 fake provider), 39 of them new.
+- Tests: 82 (74 API, 8 fake provider), 41 of them new.
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
@@ -28,7 +28,7 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - The runbook is now for this branch; sections after the walkthrough moved down by one number.
 
 ### Verified
-- Typecheck and 80 of 80 tests on Node 24 and Node 26.
+- Typecheck and 82 of 82 tests on Node 24 and Node 26.
 - On a local run: both new routes in bash and PowerShell, the dry-run evaluation (rules 24 of 40, hard cases 0 of 5).
 
 ### Not in this branch

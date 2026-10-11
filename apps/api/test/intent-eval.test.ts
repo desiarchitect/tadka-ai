@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { BudgetLedger } from '../src/assist/budget.js';
 import type { ClassifyResult } from '../src/assist/classifier.js';
 import { EvalBudget, runEval, summarize, type EvalMessage } from '../src/assist/eval.js';
+import { worstCaseInputTokens } from '../src/assist/classifiers.js';
 import { classifyWithRules, INTENTS } from '../src/assist/intent.js';
 
 const load = (f: string) => JSON.parse(readFileSync(new URL(`../eval/${f}`, import.meta.url), 'utf8')) as { version: string; messages: EvalMessage[] };
@@ -97,5 +98,18 @@ describe('the budget guard stops BEFORE sending', () => {
     await runEval(msgs.slice(0, 2), async () => ok('other'), new EvalBudget(1, 'gpt-5.4-mini', ledger));
     expect(ledger.read().calls.length).toBe(2);
     expect(ledger.spent()).toBeGreaterThan(0);
+  });
+});
+
+describe('the worst-case input bound', () => {
+  it('counts UTF-8 bytes, so Devanagari is not undercounted', () => {
+    const latin = 'a'.repeat(30);
+    const devanagari = 'क'.repeat(30); // 30 characters, 90 bytes
+    expect(worstCaseInputTokens(devanagari) - worstCaseInputTokens(latin)).toBe(60);
+  });
+
+  it('fails closed for a model with no configured price', () => {
+    const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'ep1-')), 'usage.json'), 5);
+    expect(() => ledger.assertAffordable('gpt-unknown' as never, 100, 100)).toThrow(/no price configured/);
   });
 });

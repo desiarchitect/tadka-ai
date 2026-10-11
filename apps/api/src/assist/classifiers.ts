@@ -16,10 +16,13 @@ export const rulesClassifier: IntentClassifier = async (text) => ({
   usage: { inputTokens: 0, outputTokens: 0 },
 });
 
-// Worst case for the next request: every character counts as one token (far above reality),
-// plus the system prompt and the full output cap.
-export function worstCaseChars(text: string): number {
-  return SYSTEM_PROMPT.length + text.length + 500;
+// Upper bound on the input tokens of the next request. A token covers at least one byte of
+// UTF-8 text, so the byte length is a safe upper bound for any script (Devanagari is three
+// bytes per character, so counting characters would undercount it). The fixed overhead
+// covers the response-format schema and the provider's request framing.
+export const REQUEST_OVERHEAD_TOKENS = 500;
+export function worstCaseInputTokens(text: string): number {
+  return Buffer.byteLength(SYSTEM_PROMPT, 'utf8') + Buffer.byteLength(text, 'utf8') + REQUEST_OVERHEAD_TOKENS;
 }
 
 // The LLM classifier behind the budget ledger. The ledger refuses BEFORE the request is sent
@@ -27,7 +30,7 @@ export function worstCaseChars(text: string): number {
 export function llmClassifier(model: LanguageModel, ledger: BudgetLedger, priced: PricedModel): IntentClassifier {
   return async (text) => {
     try {
-      ledger.assertAffordable(priced, worstCaseChars(text), MAX_OUTPUT_TOKENS);
+      ledger.assertAffordable(priced, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
     } catch {
       return { classifier: 'llm', outcome: 'provider_error', reason: 'budget' };
     }

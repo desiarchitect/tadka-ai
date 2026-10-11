@@ -29,9 +29,11 @@ export class BudgetLedger {
     return (inputTokens * p.inputPerM + outputTokens * p.outputPerM) / 1_000_000;
   }
 
-  // Worst case: every character is a token (far above reality), plus the full output cap.
-  assertAffordable(model: PricedModel, promptChars: number, maxOutputTokens: number): number {
-    const worst = BudgetLedger.cost(model, promptChars, maxOutputTokens);
+  // Worst case: the caller's upper bound on input tokens, plus the full output cap, priced
+  // separately. An unpriced model throws here, so the guard fails closed.
+  assertAffordable(model: PricedModel, inputTokensUpperBound: number, maxOutputTokens: number): number {
+    if (!(model in PRICES)) throw new Error(`budget: no price configured for ${model}`);
+    const worst = BudgetLedger.cost(model, inputTokensUpperBound, maxOutputTokens);
     const spent = this.spent();
     if (spent + worst > this.budgetUsd) throw new Error(`budget: spent $${spent.toFixed(6)} + worst case $${worst.toFixed(6)} exceeds cap $${this.budgetUsd}`);
     return worst;

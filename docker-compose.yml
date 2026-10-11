@@ -2,7 +2,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: tadka-ts-postgres
+    container_name: tadka-ai-postgres
     environment:
       POSTGRES_USER: tadka
       POSTGRES_PASSWORD: tadka_local
@@ -17,7 +17,7 @@ services:
   # Jaeger accepts OTLP directly, so M0 skips a separate collector.
   jaeger:
     image: jaegertracing/all-in-one:1.62.0
-    container_name: tadka-ts-jaeger
+    container_name: tadka-ai-jaeger
     profiles: [observability]
     ports:
       - "16686:16686" # UI

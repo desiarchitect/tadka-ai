@@ -24,6 +24,7 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
+- CI runs on Node 24 (required) and Node 26 (an extra check that may fail without failing the workflow), and installs pnpm with npm because Node 25 and later have no corepack.
 - The runbook is now for this branch; sections after the walkthrough moved down by one number.
 
 ### Verified

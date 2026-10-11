@@ -5,7 +5,14 @@ on:
 
 jobs:
   test:
+    # Node 24 is the required baseline. Node 26 is a compatibility check and may fail without failing the workflow.
+    name: node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.node == 26 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [24, 26]
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -21,8 +28,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-      - run: corepack enable
+          node-version: ${{ matrix.node }}
+      # Node 25 and later no longer ship corepack, so pnpm comes from npm on both versions.
+      - run: npm install -g pnpm@12.11.2
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test

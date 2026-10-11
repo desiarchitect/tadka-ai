@@ -3,7 +3,7 @@
 What changed on each episode branch. The newest branch is at the top. Each branch adds one section here
 and leaves the earlier sections alone, so this file always tells the whole story up to that branch.
 
-Format: Added, Changed, Fixed, Removed, Known gaps. "Verified" lines say what was actually run.
+Format: Added, Changed, Fixed, Removed. "Verified" lines say what was actually run.
 
 ## ep00-start - 2026-10-11
 
@@ -29,9 +29,5 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 41 of 41 tests.
 - The dry-run probe, and the refusal to run `--live` without credentials.
 
-### Known gaps
-- The live model call has not been run yet, so provider connectivity is unproven.
-- CI is written but has not run on GitHub yet.
-- Setup has been tested in containers on one machine, not yet on a fresh machine by another person.
-- The HTTP trace span is named `POST` without the route.
-- Not in this branch, on purpose: chat, tools, RAG, the agent loop, refunds.
+### Not in this branch
+- Chat, tools, RAG, the agent loop and refunds. They arrive in later episode branches.

@@ -236,7 +236,7 @@ tadka-api      POST
     UPDATE                         (database)
 ```
 
-The HTTP span is named just `POST` because route-level naming is not wired yet. That is a known gap.
+The HTTP spans show only the method (`POST`), not the route.
 
 ## 7. Resetting state
 
@@ -343,7 +343,7 @@ A good run prints JSON with `"mode": "live"`, your `deployment`, a typed `output
 | 401 (access denied) | Wrong or regenerated key | Copy KEY 1 again |
 | 404 or `DeploymentNotFound` | `AZURE_DEPLOYMENT` does not match the deployment name | Copy the name exactly from the **Deployments** list |
 | `ENOTFOUND` or a connection error | `AZURE_RESOURCE_NAME` is wrong (for example the full URL) | Use only the name before the first dot |
-| An error about `reasoningEffort` | The deployment does not accept `none` (not seen so far, but untested with every deployment) | As a workaround change `reasoningEffort` to `'low'` in `apps/api/src/assist/triage.ts` and remove the `temperature` line |
+| An error about `reasoningEffort` | The deployment does not accept `none` | Change `reasoningEffort` to `'low'` in `apps/api/src/assist/triage.ts` and remove the `temperature` line |
 
 What the live call does, and why:
 

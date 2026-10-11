@@ -14,7 +14,8 @@ exactly as it is at the end of that episode, and `git diff ep01-...ep02-...` sho
 | Branch | Episode | Status |
 |---|---|---|
 | `ep00-start` | Baseline app (orders, auth, fake payment provider) plus one structured LLM call | in progress |
-| `ep01-...` to `ep12-...` | AI features, evals, safety, operations | not started |
+| `ep01-structured-intent` | Deterministic order-status route, plus an LLM that only classifies free text into five labels, measured against keyword rules | in progress |
+| `ep02-...` to `ep12-...` | AI features, evals, safety, operations | not started |
 
 Branch names are `epNN-short-topic`. A branch is added only when the episode's code and tests pass.
 

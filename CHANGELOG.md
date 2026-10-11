@@ -22,7 +22,8 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - LLM probe (`pnpm probe:llm`): one structured call (`generateText` with `Output.object`) through the AI SDK to `gpt-5.4-mini` on Microsoft Foundry, with a dry-run mode that uses a fake model. Reasoning off, output capped at 400 tokens, no retries, `store: false`.
 - Spending guard: a local ledger that refuses a live call before sending it if the worst-case cost would pass `M0_BUDGET_USD` (default 5).
 - CI workflow for GitHub Actions: Node 24, frozen lockfile, typecheck and tests against a Postgres service.
-- `RUNBOOK.md` (how to run this branch, command by command) and this changelog.
+- `RUNBOOK.md` (how to run this branch, command by command, with install steps for Windows, macOS and Linux) and this changelog.
+- Windows support: file paths built with `fileURLToPath`, and `.gitattributes` keeps LF line endings.
 - Tests: 41 (33 API, 8 fake provider).
 
 ### Verified

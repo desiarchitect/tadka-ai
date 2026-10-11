@@ -21,25 +21,95 @@ What you will see when it runs:
 
 What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, refunds. Those arrive in later episode branches.
 
-## 2. Prerequisites
+## 2. Install these first
 
-| Need | Why | Check |
+Do this before running the first command in section 3. It works on Windows 10/11, macOS and Linux.
+
+> **Windows: run every command in this runbook in Git Bash** (installed with Git below), not in PowerShell or Command Prompt.
+> The commands use bash syntax, and `curl` in PowerShell is a different program.
+
+What you need:
+
+| Tool | Version | Why |
 |---|---|---|
-| Node 24 | The code uses Node 24 features (`--env-file-if-exists`) | `node -v` |
-| Corepack (ships with Node) | Installs the exact pnpm version in `package.json` | `corepack --version` |
-| Docker with Compose | Runs Postgres and Jaeger | `docker compose version` |
-| `curl` and `jq` | Used in the walkthrough | `jq --version` |
-| A bash shell | On Windows use WSL or Git Bash | |
+| Git | any recent | Downloads the code |
+| Node.js | **24.x** (not 22, not 25 or newer) | Runs the code. `package.json` requires `>=24 <25` |
+| pnpm | **12.11.2** | The package manager this repository is locked to |
+| Docker with Compose | recent (Docker Desktop on Windows and macOS) | Runs Postgres and Jaeger |
+| `curl` | any | Calls the API in the walkthrough. Included with macOS, Linux and Git Bash |
+| `jq` | any | Reads JSON in the walkthrough |
 
-Resources: about 1 GB of free RAM and 1 GB of disk for images. Free ports: 3000, 4010, 5544, 16686, 4318.
+Also free: about 1 GB of RAM and 1 GB of disk for images, and ports 3000, 4010, 5544, 16686 and 4318.
 No paid account is needed, except for the optional live LLM call (section 9).
+
+### Windows 10/11
+
+Run the install commands in PowerShell or Windows Terminal. They use `winget`, which comes with current Windows.
+
+1. **Git** (this also installs Git Bash):
+   ```powershell
+   winget install --id Git.Git -e
+   ```
+2. **Node.js 24:**
+   ```powershell
+   winget install --id OpenJS.NodeJS.LTS -e --version 24.20.0
+   ```
+   If that exact version is not offered, download the Node 24 Windows installer from [nodejs.org](https://nodejs.org/en/download) and choose version 24.
+   Newer Node versions will not work.
+3. **Docker Desktop.** Download it from the [Docker Desktop for Windows page](https://docs.docker.com/desktop/setup/install/windows-install/)
+   and run the installer (or `winget install -e --id Docker.DockerDesktop`). It needs WSL 2 and hardware virtualization turned on in your BIOS/UEFI,
+   and Docker recommends 8 GB of RAM. Restart if the installer asks, then open **Docker Desktop** once and wait until it reports that Docker is running.
+4. **jq:**
+   ```powershell
+   winget install --id jqlang.jq -e
+   ```
+5. **Close every terminal, then open Git Bash** from the Start menu. A new window is needed so the new programs are on the PATH.
+6. **pnpm**, in Git Bash:
+   ```bash
+   npm install -g pnpm@12.11.2
+   ```
+   Windows users install pnpm with npm because `corepack enable` needs administrator rights there.
+
+Prefer Linux on Windows? Install WSL with Ubuntu, follow the Linux steps below inside it, and in Docker Desktop turn on WSL integration for that distribution
+(**Settings**, **Resources**, **WSL integration**).
+
+### macOS
+
+1. Install [Homebrew](https://brew.sh), then: `brew install git jq` and `brew install --cask docker`. Open **Docker** once and wait until it is running.
+2. Install Node 24 with [nvm](https://github.com/nvm-sh/nvm) (follow its install steps), then open a new terminal and run `nvm install 24`.
+3. Install pnpm: `corepack enable`. If that fails with a permission error, run `npm install -g pnpm@12.11.2` instead.
+
+### Linux
+
+1. Install Git, curl and jq with your package manager, for example `sudo apt install git curl jq`.
+2. Install Docker Engine with the Compose plugin by following [docs.docker.com/engine/install](https://docs.docker.com/engine/install/) for your distribution.
+   Then run `sudo usermod -aG docker $USER` and log out and back in, so you can run `docker` without `sudo`.
+3. Install Node 24 with [nvm](https://github.com/nvm-sh/nvm), then `nvm install 24`.
+4. Install pnpm: `corepack enable` (use `sudo` if you get a permission error), or `npm install -g pnpm@12.11.2`.
+
+### Check that everything is installed
+
+Run these in your terminal (Git Bash on Windows). Every line should print a version, and the last one should not print an error.
+
+```bash
+node -v                  # v24.something
+pnpm -v                  # 12.11.2
+git --version
+docker --version
+docker compose version
+curl --version
+jq --version
+docker info              # an error here means Docker is not running: start Docker Desktop and wait
+```
+
+If `node -v` prints anything other than v24, fix that first. Everything after this depends on it.
 
 ## 3. Quick start
 
 ```bash
 git clone https://github.com/desiarchitect/tadka-ai.git && cd tadka-ai
 git checkout ep00-start
-corepack enable
+pnpm -v                 # must print 12.11.2 (see section 2 if it does not)
 pnpm install --frozen-lockfile
 cp .env.example .env
 docker compose --profile observability up -d --wait
@@ -47,7 +117,7 @@ pnpm db:migrate && pnpm db:seed
 pnpm dev
 ```
 
-`pnpm dev` stays in the foreground. Open a second terminal for the walkthrough in section 5.
+Run these in Git Bash on Windows, or any terminal on macOS and Linux. `pnpm dev` stays in the foreground. Open a second terminal for the walkthrough in section 5.
 
 ## 4. The commands, one by one
 
@@ -55,9 +125,9 @@ pnpm dev
 Switches to this episode's branch. Each episode lives on its own branch, so this is the code exactly as it is
 at the end of this episode. `main` only holds the overview.
 
-### `corepack enable`
-Turns on Corepack so `pnpm` resolves to the version pinned in `package.json` (`packageManager`). Without it
-you may get a different pnpm and a different lockfile.
+### `pnpm -v`
+Checks that the right pnpm is installed. This repository is locked to pnpm 12.11.2 (`packageManager` in `package.json`), so a different version
+could produce a different lockfile. If it prints something else, or "command not found", go back to section 2 and install pnpm.
 
 ### `pnpm install --frozen-lockfile`
 Installs the dependencies listed in `pnpm-lock.yaml` and fails if `package.json` and the lockfile disagree.
@@ -364,7 +434,10 @@ your Azure resource group (not required to run the branch): an alert only notifi
 |---|---|---|
 | `pnpm db:migrate` fails right after `docker compose up` | Postgres was not ready yet | Use `up -d --wait`, or wait a few seconds and re-run |
 | `container name ... is already in use` | A stack from another checkout uses the same fixed container names | `docker compose down -v` in that other checkout, or `docker rm -f tadka-ai-postgres tadka-ai-jaeger` |
-| `EADDRINUSE` on 3000 or 4010 | A previous `pnpm dev` is still running, or another program uses the port | Stop the old process, then start again |
+| `EADDRINUSE` on 3000 or 4010 | A previous `pnpm dev` is still running, or another program uses the port | Stop the old process, then start again. On Windows (Git Bash): `netstat -ano \| findstr :3000` shows the process id, then `taskkill //PID <id> //F` (the double slashes are needed in Git Bash) |
+| `docker: error during connect` or `failed to connect to the docker API` | Docker is not running | Start Docker Desktop and wait until it says Docker is running |
+| `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal (Git Bash on Windows), then check with the list at the end of section 2 |
+| `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24; install Node 24 (section 2) |
 | Everything returns 401 after a restart | The dev signing key is regenerated on every start | Log in again |
 | Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 7) |
 | `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | `--live` without credentials | Fill them in `.env` |

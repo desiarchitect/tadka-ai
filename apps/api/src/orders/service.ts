@@ -2,7 +2,7 @@
 // orders, an owner sees only their restaurant's orders (without the delivery address or
 // phone), an Admin sees all. An order the caller may not see is reported as not found,
 // so its existence doesn't leak.
-import { and, desc, eq, notInArray, type SQL } from 'drizzle-orm';
+import { and, desc, eq, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../shared/db.js';
 import { ConflictError, NotFoundError } from '../shared/errors.js';
 import type { Principal } from '../shared/principal.js';
@@ -33,6 +33,17 @@ export class OrdersService {
     });
   }
 
+  // The caller's most recent orders for the assistant: newest first, then by id so equal
+  // timestamps always come back in the same order. At most `limit`, with `hasMore` when older
+  // orders exist. "Latest order" means the first row of this ordering.
+  listRecent(p: Principal, limit: number) {
+    return inSpan('orders.listRecent', { 'tadka.role': p.role }, async () => {
+      const rows = await this.db.select().from(orders).where(scopeFor(p))
+        .orderBy(desc(orders.createdAt), desc(orders.id)).limit(limit + 1);
+      return { orders: rows.slice(0, limit).map((o) => view(p, o)), hasMore: rows.length > limit };
+    });
+  }
+
   get(p: Principal, orderId: string) {
     return inSpan('orders.get', { 'tadka.order_id': orderId }, async () => {
       const o = await this.findVisible(p, orderId);
@@ -55,10 +66,17 @@ export class OrdersService {
     });
   }
 
+  // One statement: the order if this caller may see it, plus whether an order with this id
+  // exists at all. A single statement reads one snapshot, so the denial classification can't
+  // race the read. The existence part returns a boolean only, never a row of someone else's.
+  // The caller always gets the same NotFoundError; `denied` is for internal diagnosis.
   private async findVisible(p: Principal, orderId: string): Promise<OrderRow> {
-    const [o] = await this.db.select().from(orders).where(and(eq(orders.id, orderId), scopeFor(p)));
-    if (!o) throw new NotFoundError('order_not_found');
-    return o;
+    const [r] = await this.db
+      .select({ exists: sql<boolean>`exists (select 1 from ${orders} where ${orders.id} = ${orderId})`, order: orders })
+      .from(sql`(select 1) as one`)
+      .leftJoin(orders, and(eq(orders.id, orderId), scopeFor(p)));
+    if (!r?.order) throw new NotFoundError('order_not_found', { denied: r?.exists === true });
+    return r.order;
   }
 
   // Optimistic concurrency: the update only applies if nobody changed the row since we read it.

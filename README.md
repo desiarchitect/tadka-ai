@@ -19,7 +19,7 @@ One TypeScript codebase: a modular monolith API plus a fake payment provider.
 
 ## Requirements
 
-- Node 24 (`.nvmrc`), Corepack (ships with Node), Docker with Compose.
+- Node 24 or 26 (`.nvmrc` pins 24), pnpm 12.11.2, Docker with Compose.
 - About 1 GB of free RAM for Postgres + Jaeger + two Node processes; ~1 GB of disk for images.
 - No paid credentials are needed for anything except the optional live LLM call.
 
@@ -30,7 +30,7 @@ The full, explained version is in [RUNBOOK.md](RUNBOOK.md). The short version:
 ```bash
 git clone https://github.com/desiarchitect/tadka-ai.git && cd tadka-ai
 git checkout ep00-start
-corepack enable
+npm install -g pnpm@12.11.2
 pnpm install --frozen-lockfile
 cp .env.example .env
 docker compose --profile observability up -d --wait

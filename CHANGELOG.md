@@ -10,7 +10,7 @@ Format: Added, Changed, Fixed, Removed. "Verified" lines say what was actually r
 First branch. Starts from `main` (overview only). Baseline backend plus one structured LLM call.
 
 ### Added
-- Workspace: pnpm monorepo (`apps/api`, `apps/fake-psp`), Node 24, TypeScript 7, pinned dependency versions and a frozen lockfile.
+- Workspace: pnpm monorepo (`apps/api`, `apps/fake-psp`), Node 24 or 26 (`engines >=24 <27`), TypeScript 7, pinned dependency versions and a frozen lockfile.
 - `docker-compose.yml`: Postgres 16 with pgvector on port 5544; Jaeger under the `observability` profile.
 - Database: one Postgres schema per module (`identity`, `restaurant`, `ordering`, `payment`), no cross-schema foreign keys, one drizzle migration, synthetic seed data (4 users, 3 restaurants, 9 orders).
 - Identity: login, refresh-token rotation with reuse detection, logout. Access tokens are 15-minute EdDSA JWTs with pinned algorithm, issuer, audience and type. Refresh tokens are stored as hashes.

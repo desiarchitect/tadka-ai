@@ -33,7 +33,7 @@ What you need:
 | Tool | Version | Why |
 |---|---|---|
 | Git | any recent | Downloads the code |
-| Node.js | **24.x** (not 22, not 25 or newer) | Runs the code. `package.json` requires `>=24 <25` |
+| Node.js | **24.x or 26.x** (not 22, not 25) | Runs the code. `package.json` requires `>=24 <27`. Node 24 is the long-term-support release; Node 26 is the newest |
 | pnpm | **12.11.2** | The package manager this repository is locked to |
 | Docker with Compose | recent (Docker Desktop on Windows and macOS) | Runs Postgres and Jaeger |
 | `curl` | any | Calls the API in the walkthrough. Included with macOS, Linux and Git Bash |
@@ -55,7 +55,7 @@ Run the install commands in PowerShell or Windows Terminal. They use `winget`, w
    winget install --id OpenJS.NodeJS.LTS -e --version 24.20.0
    ```
    If that exact version is not offered, download the Node 24 Windows installer from [nodejs.org](https://nodejs.org/en/download) and choose version 24.
-   Newer Node versions will not work. If `node -v` already prints v25 or higher, uninstall that Node first (`winget uninstall OpenJS.NodeJS`) and open a new terminal before installing Node 24.
+   Node 26 also works: download its installer from the same page. Node 22 and Node 25 do not work. If `node -v` prints one of those, uninstall it first (`winget uninstall OpenJS.NodeJS`) and open a new terminal before installing.
 3. **Docker Desktop.** Download it from the [Docker Desktop for Windows page](https://docs.docker.com/desktop/setup/install/windows-install/)
    and run the installer (or `winget install -e --id Docker.DockerDesktop`). It needs WSL 2 and hardware virtualization turned on in your BIOS/UEFI,
    and Docker recommends 8 GB of RAM. Restart if the installer asks, then open **Docker Desktop** once and wait until it reports that Docker is running.
@@ -68,7 +68,7 @@ Run the install commands in PowerShell or Windows Terminal. They use `winget`, w
    ```bash
    npm install -g pnpm@12.11.2
    ```
-   Windows users install pnpm with npm because `corepack enable` needs administrator rights there.
+   pnpm is installed with npm on every system because Node 25 and later no longer include `corepack`.
 
 Prefer Linux on Windows? Install WSL with Ubuntu, follow the Linux steps below inside it, and in Docker Desktop turn on WSL integration for that distribution
 (**Settings**, **Resources**, **WSL integration**).
@@ -77,7 +77,7 @@ Prefer Linux on Windows? Install WSL with Ubuntu, follow the Linux steps below i
 
 1. Install [Homebrew](https://brew.sh), then: `brew install git jq` and `brew install --cask docker`. Open **Docker** once and wait until it is running.
 2. Install Node 24 with [nvm](https://github.com/nvm-sh/nvm) (follow its install steps), then open a new terminal and run `nvm install 24`.
-3. Install pnpm: `corepack enable`. If that fails with a permission error, run `npm install -g pnpm@12.11.2` instead.
+3. Install pnpm: `npm install -g pnpm@12.11.2`.
 
 ### Linux
 
@@ -85,14 +85,14 @@ Prefer Linux on Windows? Install WSL with Ubuntu, follow the Linux steps below i
 2. Install Docker Engine with the Compose plugin by following [docs.docker.com/engine/install](https://docs.docker.com/engine/install/) for your distribution.
    Then run `sudo usermod -aG docker $USER` and log out and back in, so you can run `docker` without `sudo`.
 3. Install Node 24 with [nvm](https://github.com/nvm-sh/nvm), then `nvm install 24`.
-4. Install pnpm: `corepack enable` (use `sudo` if you get a permission error), or `npm install -g pnpm@12.11.2`.
+4. Install pnpm: `npm install -g pnpm@12.11.2`.
 
 ### Check that everything is installed
 
 Run these in your terminal (Git Bash on Windows). Every line should print a version, and the last one should not print an error.
 
 ```bash
-node -v                  # v24.something
+node -v                  # v24.x or v26.x
 pnpm -v                  # 12.11.2
 git --version
 docker --version
@@ -102,7 +102,7 @@ jq --version
 docker info              # an error here means Docker is not running: start Docker Desktop and wait
 ```
 
-If `node -v` prints anything other than v24, fix that first. Everything after this depends on it.
+If `node -v` prints anything other than v24 or v26, fix that first. Everything after this depends on it.
 
 ## 3. Quick start
 
@@ -437,8 +437,8 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `EADDRINUSE` on 3000 or 4010 | A previous `pnpm dev` is still running, or another program uses the port | Stop the old process, then start again. On Windows (Git Bash): `netstat -ano \| findstr :3000` shows the process id, then `taskkill //PID <id> //F` (the double slashes are needed in Git Bash) |
 | `docker: error during connect` or `failed to connect to the docker API` | Docker is not running | Start Docker Desktop and wait until it says Docker is running |
 | `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal (Git Bash on Windows), then check with the list at the end of section 2 |
-| `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24; install Node 24 (section 2) |
-| `corepack` is not recognized | Node 25 and later no longer include corepack | Install Node 24, then `npm install -g pnpm@12.11.2` |
+| `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24 or v26; install Node 24 (section 2) |
+| `corepack` is not recognized | Node 25 and later no longer include corepack | Skip corepack and run `npm install -g pnpm@12.11.2` |
 | Everything returns 401 after a restart | The dev signing key is regenerated on every start | Log in again |
 | Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 7) |
 | `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | `--live` without credentials | Fill them in `.env` |

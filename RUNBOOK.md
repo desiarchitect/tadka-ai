@@ -64,20 +64,35 @@ Installs the dependencies listed in `pnpm-lock.yaml` and fails if `package.json`
 This is what CI runs, so a green install here means a green install there. Install scripts are switched off
 for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 
-### `cp .env.example .env`
-Creates your local settings. `.env` is git-ignored: never commit it.
+### Create your `.env` file
+`.env` holds your local settings and secrets. It is git-ignored, so it is never committed. You make it by copying the template.
 
-| Variable | Default | What it does |
-|---|---|---|
-| `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | Where the API finds Postgres |
-| `FAKE_PSP_URL` | `http://localhost:4010` | Where the API finds the fake payment provider |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Where traces are sent. Delete or empty it to run without tracing |
-| `AZURE_RESOURCE_NAME`, `AZURE_API_KEY` | empty | Only for the live LLM call (section 9) |
-| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Name of the model deployment. The series uses `gpt-5.4-mini` on Microsoft Foundry |
-| `M0_BUDGET_USD` | `5` | Hard spending cap enforced by the probe |
+**Step 1: copy the template** (run from the repository root).
 
-The database credentials are local-only defaults and match `docker-compose.yml`.
+| Shell | Command |
+|---|---|
+| macOS, Linux, WSL, Git Bash | `cp .env.example .env` |
+| Windows PowerShell | `Copy-Item .env.example .env` |
+
+**Step 2: check that Git ignores it.** `git check-ignore .env` should print `.env`. If it prints nothing, stop and do not add secrets.
+
+**Step 3: open `.env` in any editor** and fill in only what you need. Write `NAME=value` with no spaces around `=` and no quotes.
+
+| Variable | Default | Needed? | What it does |
+|---|---|---|---|
+| `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
+| `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
+| `AZURE_RESOURCE_NAME` | empty | Only for `--live` | The name of your Azure resource. See section 9 |
+| `AZURE_API_KEY` | empty | Only for `--live` | KEY 1 of that resource. See section 9 |
+| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Only for `--live` | The name you gave the model deployment. See section 9 |
+| `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe |
+
+Everything except the three `AZURE_*` values already works as copied. You can run the whole branch, including all tests and
+the dry-run probe, without filling anything in.
+
 Do not set `PORT` in `.env`: the API (3000) and the fake provider (4010) both read it and would collide.
+Never paste your key into a chat, an issue or a commit.
 
 ### `docker compose --profile observability up -d --wait`
 Starts two containers and waits until they are healthy:
@@ -260,10 +275,75 @@ pnpm probe:llm -- --live       # ONE real call to the series model (gpt-5.4-mini
 The dry run prints a typed answer (`intent`, `language`, `needsHuman`, `summary`) from a fake model. It proves the
 code path and the schema, not the provider.
 
-The series uses `gpt-5.4-mini` deployed on Microsoft Foundry (deployment type Global Standard). To run the live call you need your own Foundry resource with that deployment:
+### Run the live call: where each Azure value goes
 
-1. Put `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`. If you named your deployment something else, set `AZURE_DEPLOYMENT` too.
-2. Run `pnpm probe:llm -- --live`.
+The series uses `gpt-5.4-mini` deployed on Microsoft Foundry (deployment type Global Standard). To run the live call you need an Azure
+subscription and your own resource with that model deployed. Do this once.
+
+**A. Create the resource.** Pick one way.
+
+- *Azure portal:* Create a resource, search for **Azure OpenAI**, select **Create**. On the **Basics** tab choose a subscription, a resource group,
+  a region and a **Name**, with pricing tier Standard. Select **Review + submit**, then **Create**, then **Go to resource**.
+  Pick a region where `gpt-5.4-mini` is available as Global Standard (check the model's region table in Microsoft's Foundry Models docs).
+- *Azure CLI:*
+
+  ```bash
+  az login
+  az group create -n tadka-rg -l eastus2        # eastus2 is an example; use a region that offers the model
+  az cognitiveservices account create -n my-tadka-ai -g tadka-rg \
+    --kind AIServices --sku S0 -l eastus2 --custom-domain my-tadka-ai
+  ```
+
+  The name you pass with `-n` (here `my-tadka-ai`) must be unique across Azure. Remember it: it is your resource name.
+
+**B. Deploy the model.** Sign in at [ai.azure.com](https://ai.azure.com), open your resource, and select **Deployments**
+(or **Models + endpoints** in newer portal versions). Select **+ Deploy model**, then **Deploy base model**, choose **gpt-5.4-mini**, and **Confirm**.
+Set:
+
+- **Deployment name**: `gpt-5.4-mini`. Keep the name starting with `gpt-5.4-mini` (for example `gpt-5.4-mini-1` also works): the AI SDK reads the name
+  to know this is a reasoning model.
+- **Deployment type**: Global Standard (shown as **Global-Standard** in some portal versions).
+
+Select **Deploy** and wait until the state shows **Succeeded**. CLI equivalent:
+
+```bash
+az cognitiveservices account deployment create -n my-tadka-ai -g tadka-rg \
+  --deployment-name gpt-5.4-mini --model-name gpt-5.4-mini --model-version 2026-03-17 \
+  --model-format OpenAI --sku-name GlobalStandard --sku-capacity 10
+```
+
+`--sku-capacity 10` is a rate limit of 10k tokens per minute. It does not change the price, which is per token.
+
+**C. Copy the values.** In the Azure portal open your resource and go to **Resource Management**, then **Keys and Endpoint**.
+Copy **KEY 1** and **Endpoint**. CLI equivalent: `az cognitiveservices account keys list -n my-tadka-ai -g tadka-rg` (use `key1`).
+
+**D. Put them in `.env`.**
+
+| Azure shows | Goes in `.env` as | Example |
+|---|---|---|
+| **Endpoint**, for example `https://my-tadka-ai.openai.azure.com/`. Take only the name between `https://` and the first dot | `AZURE_RESOURCE_NAME` | `AZURE_RESOURCE_NAME=my-tadka-ai` |
+| **KEY 1** | `AZURE_API_KEY` | `AZURE_API_KEY=<paste the key>` |
+| The **Deployment name** you chose in step B | `AZURE_DEPLOYMENT` | `AZURE_DEPLOYMENT=gpt-5.4-mini` |
+
+Do not paste the full endpoint URL into `AZURE_RESOURCE_NAME`: the code builds `https://<name>.openai.azure.com/openai/v1` itself.
+Treat KEY 1 like a password. If it ever leaks, select **Regenerate Key** on the same **Keys and Endpoint** page; the old key stops working immediately.
+
+**E. Run it.**
+
+```bash
+pnpm probe:llm -- --live
+```
+
+A good run prints JSON with `"mode": "live"`, your `deployment`, a typed `output` (`intent`, `language`, `needsHuman`, `summary`),
+`latencyMs`, token `usage`, and `costUsd`. If it fails:
+
+| Message or symptom | Likely cause | Fix |
+|---|---|---|
+| `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | A value is empty or `.env` is not in the repository root | Fill both, save, run again from the repository root |
+| 401 (access denied) | Wrong or regenerated key | Copy KEY 1 again |
+| 404 or `DeploymentNotFound` | `AZURE_DEPLOYMENT` does not match the deployment name | Copy the name exactly from the **Deployments** list |
+| `ENOTFOUND` or a connection error | `AZURE_RESOURCE_NAME` is wrong (for example the full URL) | Use only the name before the first dot |
+| An error about `reasoningEffort` | The deployment does not accept `none` (not seen so far, but untested with every deployment) | As a workaround change `reasoningEffort` to `'low'` in `apps/api/src/assist/triage.ts` and remove the `temperature` line |
 
 What the live call does, and why:
 

@@ -1,0 +1,38 @@
+{
+  "version": "dev-1",
+  "note": "Used to write and tune the prompt and rules. Not part of the evaluation set.",
+  "messages": [
+    {
+      "text": "Where is my order?",
+      "expected": "order_status"
+    },
+    {
+      "text": "Please cancel my order",
+      "expected": "cancel_order"
+    },
+    {
+      "text": "I want my money back, the food was cold",
+      "expected": "refund_request"
+    },
+    {
+      "text": "Is the paneer butter masala veg?",
+      "expected": "menu_question"
+    },
+    {
+      "text": "Thanks, bye",
+      "expected": "other"
+    },
+    {
+      "text": "mera order kab aayega",
+      "expected": "order_status"
+    },
+    {
+      "text": "order cancel kar do yaar",
+      "expected": "cancel_order"
+    },
+    {
+      "text": "cancel mat karna, bas batao order kahan hai",
+      "expected": "order_status"
+    }
+  ]
+}

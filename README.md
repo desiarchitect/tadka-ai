@@ -1,5 +1,7 @@
 # Tadka (TypeScript edition)
 
+This is the `ep00-start` branch of [tadka-ai](https://github.com/desiarchitect/tadka-ai). The `main` branch explains how the episode branches fit together.
+
 A small food-delivery backend used as the running project of an AI engineering series.
 One TypeScript codebase: a modular monolith API plus a fake payment provider.
 

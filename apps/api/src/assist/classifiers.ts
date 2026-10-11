@@ -16,10 +16,11 @@ export const rulesClassifier: IntentClassifier = async (text) => ({
   usage: { inputTokens: 0, outputTokens: 0 },
 });
 
-// Upper bound on the input tokens of the next request. A token covers at least one byte of
-// UTF-8 text, so the byte length is a safe upper bound for any script (Devanagari is three
-// bytes per character, so counting characters would undercount it). The fixed overhead
-// covers the response-format schema and the provider's request framing.
+// Conservative estimate of the input tokens of the next request, not a guaranteed bound.
+// Subword tokenizers usually produce fewer tokens than UTF-8 bytes, including for Devanagari
+// (three bytes per character, so counting characters would undercount it). The fixed overhead
+// covers the response-format schema and the provider's request framing. The provider's
+// account spending limit remains the hard safeguard.
 export const REQUEST_OVERHEAD_TOKENS = 500;
 export function worstCaseInputTokens(text: string): number {
   return Buffer.byteLength(SYSTEM_PROMPT, 'utf8') + Buffer.byteLength(text, 'utf8') + REQUEST_OVERHEAD_TOKENS;

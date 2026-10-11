@@ -483,7 +483,7 @@ how each method behaves on these 40 messages. They are not an accuracy figure fo
 ### The spending guard on the live run
 
 `--live` sends one request per message (40) and is guarded twice. Before each request it adds what has actually been spent so far to a
-conservative worst case for the next request (the UTF-8 byte length of the prompt counted as tokens, plus a fixed overhead and the full output cap, priced separately; an unpriced model is refused), and stops if that could cross either cap:
+conservative estimate of the next request's cost (the UTF-8 byte length of the prompt counted as tokens, plus a fixed overhead and the full output cap, priced separately; an unpriced model is refused), and stops if that could cross either cap:
 
 | Setting | Default | What it limits |
 |---|---|---|
@@ -541,7 +541,7 @@ Expected: 8 fake-provider tests and 74 API tests pass (82 in all). Your dev data
 | `intent-rules.test.ts` (6) | The five-label schema rejects unknown labels and extra fields; the keyword rules, their documented blind spot (negation) and the dev set |
 | `intent-classifier.test.ts` (6) | Each outcome with a fake provider: ok, a valid `other`, invalid output (five shapes), refusal, provider errors; no retry; the cost guards are sent |
 | `assist-intent.test.ts` (11) | Customers only, no identity in the body, one/several/no active orders, a failing lookup is a 500, labels that must not act change nothing in the database, fallbacks per outcome, rules by default |
-| `intent-eval.test.ts` (10) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent, the input bound counting UTF-8 bytes, an unpriced model refused |
+| `intent-eval.test.ts` (10) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent, the input estimate counting UTF-8 bytes, an unpriced model refused |
 | `boundaries.test.ts` (4) | `assist` imports only the public orders service, and the model output has no field that can name a user |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 

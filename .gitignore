@@ -4,3 +4,4 @@ node_modules/
 .eval-runs/
 *.log
 dist/
+logs/

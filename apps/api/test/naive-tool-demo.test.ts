@@ -23,3 +23,20 @@ describe('the naive tool (deliberately vulnerable)', () => {
     expect(r.status === 'ok' && r.order.deliveryAddress).toBe('House 7, Sample Road, Mumbai 400001');
   });
 });
+
+describe('the real tool (the fix)', () => {
+  it("returns not_found for Aman's order in Rahul's chat, with no trace of the order", async () => {
+    const { executeToolCall } = await import('../src/assist/tools/executor.js');
+    const { memoryAudit } = await import('../src/assist/tools/audit.js');
+    const { OrdersService } = await import('../src/orders/service.js');
+    const { RestaurantsService } = await import('../src/restaurants/service.js');
+    const deps = { orders: new OrdersService(stack.db, {} as never), restaurants: new RestaurantsService(stack.db), audit: memoryAudit(), log: () => {} };
+    // Even if the model adds Aman's user id, the strict schema refuses it...
+    const withUserId = await executeToolCall(deps, { userId: IDS.rahul, role: 'Customer' }, { callId: 'c1', tool: 'get_order', input: { userId: IDS.aman, orderId: amanOrderId } });
+    expect(withUserId.publicStatus).toBe('invalid_args');
+    // ...and without it, the identity comes from Rahul's token, so the service says not found.
+    const r = await executeToolCall(deps, { userId: IDS.rahul, role: 'Customer' }, { callId: 'c2', tool: 'get_order', input: { orderId: amanOrderId } });
+    expect(r.modelResult).toEqual({ status: 'not_found' });
+    expect(JSON.stringify(r)).not.toContain('Sample Road');
+  });
+});

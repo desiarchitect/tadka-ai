@@ -5,6 +5,40 @@ and leaves the earlier sections alone, so this file always tells the whole story
 
 Format: Added, Changed, Fixed, Removed. "Verified" lines say what was actually run.
 
+## ep02-typed-tool-calling - 2026-10-11
+
+Episode 2: typed tool calling with server-side identity. Starts from `ep01-structured-intent`.
+
+### Added
+- `apps/api/demo/naive-get-order.ts`: a deliberately vulnerable tool that takes `{ userId, orderId }` from the model. A test shows Rahul's chat reading the address on Aman's order through it. It is outside `src/` and a test checks that nothing in `src/` imports it.
+- Three read-only tools in `src/assist/tools/`: `get_my_orders`, `get_order`, `get_restaurant_menu`. No tool has a user field; the executor passes the verified principal to the orders and restaurants services. Results contain allow-listed fields only (no address, phone or customer id), names are capped, menu text is labelled as untrusted data.
+- The executor checks, in order: known tool, parseable input, strict schema, role, read-only policy, then calls the service. Every call ends as `ok`, `not_found`, `invalid_args` or `failed`. A tool a role is not offered looks like an unknown tool. A backend failure is `failed`, never an empty list.
+- `src/assist/agent-loop.ts`: our own loop around `generateText`. The model must call a tool on every step and finishes with `final_answer`, naming which results answer the question or asking one of three fixed clarifying questions. The reply is rendered from templates (`src/assist/templates.ts`): the model never writes text the user sees, so prose instead of a tool call is `invalid_output`.
+- Limits, each enforced on its own: 6 model requests, 8 tool calls (a round that would pass 8 is not run), 3 tool calls at once, one 20 s deadline for the whole question (a slow tool or model ends the turn; late results are discarded), 32 KB per request (bytes), 8 KB per tool result (lists drop whole trailing items), 10 orders with `hasMore`, 25 menu items with `totalItems`.
+- Every tool call gets exactly one result, tied to its call id, even when parallel calls finish out of order.
+- Spending guard per model request: a conservative cost estimate (input bytes counted as tokens plus overheads, times `ASSIST_ESTIMATE_MARGIN`; the full output cap, which is also sent on every request; priced separately), checked against `ASSIST_TURN_BUDGET_USD` and then reserved in the shared ledger. Actual usage is charged after; missing usage is charged at the estimate; usage above the estimate is charged in full, logged as `estimator_violation`, and stops the turn. An unpriced model sends nothing.
+- Ledger reservations (`reserved`, `sent`, `settled`, `released`) with a lock file and durable writes, so concurrent processes on one machine cannot spend the same allowance. On start, never-sent reservations are released and sent-but-unsettled ones stay held. `pnpm budget:reservations` and `pnpm budget:settle` let an operator settle them once each.
+- `POST /assist/chat`: customers only, body `{ "text" }`, single turn, returns `{ answer, stopReason, steps }`. Without `AZURE_*` settings it returns 503 `assistant_not_configured`.
+- `OrdersService.listRecent` (newest first, then by id) and `RestaurantsService.menuPage` (by name, then id, with the total).
+- Restricted audit log `logs/security-audit.jsonl`: the only place that records a request for another customer's order (principal id and an HMAC of the order id, no order data). Ordinary logs show `not_found` for that case exactly as for an invented id.
+- Settings: `ASSIST_PRICED_AS`, `ASSIST_MAX_OUTPUT_TOKENS`, `ASSIST_TURN_BUDGET_USD`, `ASSIST_ESTIMATE_MARGIN`, `AUDIT_HMAC_KEY`.
+- Tests: 140 (132 API, 8 fake provider), 58 of them new.
+- `RUNBOOK.md` section 7 (bash and PowerShell), README section, new troubleshooting rows.
+
+### Changed
+- The orders service finds an order and classifies a denial in one SQL statement, so the check cannot race the read. The caller still gets the same 404; whether the order exists is kept in an internal, non-serialized flag on the error.
+- The EP1 spending guard now counts reservations held by other requests.
+- The boundary test covers `assist/tools` and the loop, checks that `src/` never imports `demo/`, and checks that no tool schema has a user field.
+- The runbook is now for this branch; sections after section 6 moved down by one number.
+
+### Verified
+- Typecheck and 140 of 140 tests on Node 24 and Node 26.
+- On a clean clone: install, migrate, seed, `pnpm dev`; the naive-tool demo; `POST /assist/chat` returning 503 without a model, in bash and PowerShell; the budget commands.
+- The loop through the Azure provider package against a local stand-in for the Responses API: tool calls, tool results, `tool_choice: required`, the output cap, `store: false` and reasoning off are sent as expected. This checks the request and response format only, not a real model.
+
+### Not in this branch
+- Conversations, tools that change anything, RAG, and prompt-injection defences beyond labelling database text. They arrive in later episode branches.
+
 ## ep01-structured-intent - 2026-10-11
 
 Episode 1: not every AI feature is an agent. Starts from `ep00-start`.

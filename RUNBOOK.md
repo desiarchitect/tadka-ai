@@ -1,19 +1,20 @@
-# Runbook: `ep01-structured-intent`
+# Runbook: `ep02-typed-tool-calling`
 
 Everything you need to run this branch, what each command does, and what you should see.
 Every command below was run on a clean checkout before this runbook was written.
 
 ## 1. What this branch is
 
-`ep01-structured-intent` is episode 1: **not every AI feature is an agent**. It starts from the baseline backend
-(`ep00-start`: login, restaurants, orders, a charge through a fake payment provider) and adds one idea:
+`ep02-typed-tool-calling` is episode 2: **typed tool calling with server-side identity**. It starts from episode 1
+(`ep01-structured-intent`: a deterministic order-status route and a free-text intent classifier) and adds an assistant that
+can look things up with tools:
 
-> The model classifies. The application decides. The backend owns the truth.
+> The model requests a tool. The executor validates the request. The service enforces access. The application decides what can be claimed.
 
-A structured request ("status of order X") is answered by plain code with no model. A free-text message
-("cancel mat karna, bas status batao") is classified into one of five labels, first by keyword rules and then by an LLM with
-typed output, and you measure both on the same 40 messages. Whatever the label, the application, not the model, decides
-what happens next, and nothing here cancels, refunds or changes an order.
+You first see the failure: a naive tool that takes the user id from the model hands Rahul the address on Aman's order. Then
+the fix: three read-only tools whose identity comes from the verified token, an executor that validates every call, and a
+loop with hard limits. The model chooses tools and chooses which results answer the question. It never writes the reply:
+the application renders it from the tool results, so an order status, a total or a price can only come from the database.
 
 What you will see when it runs:
 
@@ -25,9 +26,12 @@ What you will see when it runs:
 | One typed answer from a language model | `pnpm probe:llm` |
 | A deterministic order-status route and a free-text intent route | Section 6 |
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
-| 82 passing tests (74 API + 8 fake provider) | `pnpm test` |
+| The naive tool leaking another customer's address, and the fix | Section 7 |
+| `POST /assist/chat`: a question answered with tools | Section 7 |
+| 140 passing tests (132 API + 8 fake provider) | `pnpm test` |
 
-What is **not** in this branch, on purpose: tools, the agent loop, conversations, RAG, refunds, any action taken from a message. Those arrive in later episode branches.
+What is **not** in this branch, on purpose: conversations (each question stands alone), tools that change anything,
+RAG, and defences against prompt injection beyond labelling database text as data. Those arrive in later episode branches.
 
 ## 2. Install these first
 
@@ -35,7 +39,7 @@ Do this before running the first command in section 3. It works on Windows 10/11
 
 > **Windows: you can use either PowerShell or Git Bash.** Setup commands (`git`, `pnpm`, `docker`) are the same in both. Where PowerShell needs
 > different syntax, this runbook gives a PowerShell version next to the bash one: the install check (section 2), Quick start (section 3),
-> the `.env` copy (section 4), the walkthrough (section 5, "In PowerShell") and teardown (section 12). The bash walkthrough also needs `curl` and `jq`; the PowerShell one does not.
+> the `.env` copy (section 4), the walkthrough (section 5, "In PowerShell") and teardown (section 13). The bash walkthrough also needs `curl` and `jq`; the PowerShell one does not.
 
 What you need:
 
@@ -49,7 +53,7 @@ What you need:
 | `jq` | any | Reads JSON in the bash walkthrough. Not needed in PowerShell |
 
 Also free: about 1 GB of RAM and 1 GB of disk for images, and ports 3000, 4010, 5544, 16686 and 4318.
-No paid account is needed, except for the optional live LLM call (section 10).
+No paid account is needed, except for the optional live LLM call (section 11).
 
 ### Windows 10/11
 
@@ -117,7 +121,7 @@ If `node -v` prints anything other than v24 or v26, fix that first. Everything a
 
 ```bash
 git clone https://github.com/desiarchitect/tadka-ai.git && cd tadka-ai
-git checkout ep01-structured-intent
+git checkout ep02-typed-tool-calling
 pnpm -v                 # must print 12.11.2 (see section 2 if it does not)
 pnpm install --frozen-lockfile
 cp .env.example .env
@@ -133,7 +137,7 @@ Run these in Git Bash on Windows, or any terminal on macOS and Linux. `pnpm dev`
 ```powershell
 git clone https://github.com/desiarchitect/tadka-ai.git
 cd tadka-ai
-git checkout ep01-structured-intent
+git checkout ep02-typed-tool-calling
 pnpm -v                 # must print 12.11.2
 pnpm install --frozen-lockfile
 Copy-Item .env.example .env
@@ -145,7 +149,7 @@ pnpm dev
 
 ## 4. The commands, one by one
 
-### `git checkout ep01-structured-intent`
+### `git checkout ep02-typed-tool-calling`
 Switches to this episode's branch. Each episode lives on its own branch, so this is the code exactly as it is
 at the end of this episode. `main` only holds the overview.
 
@@ -177,11 +181,16 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
 | `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
-| `AZURE_RESOURCE_NAME` | empty | Only for `--live` | The name of your Azure resource. See section 10 |
-| `AZURE_API_KEY` | empty | Only for `--live` | KEY 1 of that resource. See section 10 |
-| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Only for `--live` | The name you gave the model deployment. See section 10 |
+| `AZURE_RESOURCE_NAME` | empty | Only for `--live` and section 7 | The name of your Azure resource. See section 11 |
+| `AZURE_API_KEY` | empty | Only for `--live` and section 7 | KEY 1 of that resource. See section 11 |
+| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Only for `--live` and section 7 | The name you gave the model deployment. See section 11 |
 | `EVAL_BUDGET_USD` | `0.5` | No | Spending cap for one `pnpm eval:intent --live` run (section 6) |
-| `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe |
+| `M0_BUDGET_USD` | `5` | No | Hard spending cap for everything sent from this checkout (probe, evaluation, assistant) |
+| `ASSIST_PRICED_AS` | `gpt-5.4-mini` | No | Which price list your deployment is charged at (section 7) |
+| `ASSIST_MAX_OUTPUT_TOKENS` | `400` | No | Output cap sent with every assistant request (section 7) |
+| `ASSIST_TURN_BUDGET_USD` | `0.05` | No | Spending cap for one question to the assistant (section 7) |
+| `ASSIST_ESTIMATE_MARGIN` | `1.25` | No | Safety margin on the cost estimate (section 7) |
+| `AUDIT_HMAC_KEY` | empty | No | Key for hashing order ids in the audit log. Empty means a new key each start (section 7) |
 
 Everything except the three `AZURE_*` values already works as copied. You can run the whole branch, including all tests and
 the dry-run probe, without filling anything in.
@@ -223,7 +232,7 @@ Starts both apps in parallel:
 
 On start the API prints `JWT_PRIVATE_JWK unset: using a fresh dev signing key`. That means tokens are signed with a key
 created at start-up, so **every restart invalidates all tokens**. Log in again after a restart.
-The fake provider keeps its state in memory, so a restart is a clean slate for it (see section 8).
+The fake provider keeps its state in memory, so a restart is a clean slate for it (see section 9).
 
 ## 5. Walkthrough: what to run and what you should see
 
@@ -493,7 +502,158 @@ conservative estimate of the next request's cost (the UTF-8 byte length of the p
 When a cap would be crossed the run stops without sending that request, marks the rest `budget_stop`, and does not retry.
 Requests use `maxRetries: 0` and a 100-token output cap, and only synthetic messages are sent.
 
-## 7. Traces in Jaeger
+## 7. EP2: ask with tools
+
+Everything here uses the walkthrough's `login` helper (bash) or the `Call` and `Login` helpers (PowerShell) from section 5.
+Run `pnpm db:seed` and restart `pnpm dev` first if you changed any orders earlier.
+
+### Is the assistant on?
+
+When `pnpm dev` starts it prints one line for the assistant:
+
+- `POST /assist/chat: off (no AZURE_* settings)`: the route answers `{"error":"assistant_not_configured"} [503]`. Demo 1 and all the tests still work without a key.
+- `POST /assist/chat: Foundry deployment gpt-5.4-mini, priced as gpt-5.4-mini`: `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` are set in `.env` (section 11 shows where each value comes from).
+
+### Demo 1: the naive tool leaks (no key needed)
+
+`apps/api/demo/naive-get-order.ts` is the tool most first attempts look like: the model fills in `{ userId, orderId }` and the
+tool trusts both. It lives outside `src/`, is never imported by the app (a test checks this), and exists only to be shown failing.
+
+```bash
+pnpm --filter @tadka/api exec vitest run test/naive-tool-demo.test.ts
+```
+
+Two tests pass. The first proves the leak: Rahul is logged in, the "model" supplies Aman's user id, and the naive tool returns
+`House 7, Sample Road, Mumbai 400001`, the address on Aman's order. The second runs the real tool for the same request:
+the strict schema refuses the extra `userId` field, and without it the identity comes from Rahul's token, so the orders
+service answers `not_found`. A strict schema helps, but it is not the protection: the ownership check in the service is.
+
+### Demo 2: ask a question
+
+```bash
+chat() {
+  curl -s -w ' [%{http_code}]\n' -XPOST localhost:3000/assist/chat -H "authorization: Bearer $RAHUL" \
+    -H 'content-type: application/json' -d "{\"text\":\"$1\"}"
+}
+RAHUL=$(login rahul@tadka.test)
+chat "What is my latest order, and what is on the menu there?"
+```
+
+```powershell
+function Chat($Token, $Text) { Call POST /assist/chat $Token @{ text = $Text } }
+$RAHUL = Login rahul@tadka.test
+Chat $RAHUL 'What is my latest order, and what is on the menu there?'
+```
+
+The response has three fields:
+
+| Field | What it is |
+|---|---|
+| `answer` | The reply, written by application templates from the tool results (`apps/api/src/assist/templates.ts`) |
+| `stopReason` | Why the turn ended (table below). `answered` is the normal case |
+| `steps` | Every tool the model asked for, with its status: `ok`, `not_found`, `invalid_args` or `failed` |
+
+A typical run asks for `get_my_orders`, then `get_restaurant_menu` for that order's restaurant, and the answer starts with
+`Your recent orders, newest first:` followed by the menu. A real model may pick a different route to the answer; the answer
+text always comes from the templates.
+
+### Demo 3: someone else's order, and an id that does not exist
+
+```bash
+AMAN_ORDER=$(curl -s localhost:3000/orders -H "authorization: Bearer $(login aman@tadka.test)" | jq -r '.[0].id')
+chat "What is the status of order $AMAN_ORDER?"
+chat "What is the status of order 99999999-9999-4999-8999-999999999999?"
+```
+
+```powershell
+$AMAN_ORDER = (Call GET /orders (Login aman@tadka.test) | ConvertFrom-Json)[0].id
+Chat $RAHUL "What is the status of order $AMAN_ORDER?"
+Chat $RAHUL 'What is the status of order 99999999-9999-4999-8999-999999999999?'
+```
+
+Both answers are `I couldn't find that order.` with `{"tool":"get_order","status":"not_found"}`. Nothing in the response, and
+nothing in the `pnpm dev` log (`"tool":"get_order","status":"not_found"` both times), tells you that the first order exists.
+The only place that records the difference is the restricted audit log, `apps/api/logs/security-audit.jsonl`: one
+`forbidden_as_not_found` line for Aman's order, with Rahul's user id and a hash of the order id, never the id itself or any order data.
+That file is for operators; it is git-ignored and never returned to a caller.
+
+### What the model can and cannot do
+
+| The model can | The model cannot |
+|---|---|
+| Call `get_my_orders` (the caller's 10 most recent orders, newest first) | Name a user: no tool has a user field, and an extra field is rejected |
+| Call `get_order` with an order id | See another customer's order: the orders service returns `not_found` |
+| Call `get_restaurant_menu` with a restaurant id (at most 25 items) | Change anything: all three tools are read-only |
+| Finish with `final_answer`: which results to show, or ask a fixed clarifying question | Write the reply. Prose instead of a tool call is `invalid_output`, and that text is never shown |
+
+Menu item names come from the database and are labelled `untrusted_data`. That label is not a defence against prompt injection; real defences arrive in a later episode.
+
+### Stop reasons
+
+| `stopReason` | What happened | `answer` |
+|---|---|---|
+| `answered` | The model named the results that answer the question | Rendered from those results |
+| `clarify` | The question was unclear or not about orders or menus | A fixed question |
+| `invalid_output` | Prose instead of a tool call twice, unusable tool calls twice, or a result that does not exist | The safe fallback |
+| `refusal` | The provider filtered the request | The safe fallback |
+| `provider_error` | Timeout, bad key, quota or network | The safe fallback |
+| `step_limit`, `tool_call_limit`, `deadline` | A limit below was reached | The safe fallback |
+| `budget` | The spending guard stopped the next request before it was sent | The safe fallback |
+| `history_limit` | The request would have been larger than 32 KB | Rendered from the results gathered so far |
+
+The safe fallback is `Sorry, I can't answer that right now. You can check your orders on the Orders page.`
+
+### Limits
+
+Each limit is enforced on its own; reaching any one ends the turn.
+
+| Limit | Value |
+|---|---|
+| Model requests per question | 6 |
+| Tool calls per question | 8 (a round that would go past 8 is not run) |
+| Tool calls running at once | 3 |
+| Time per question | 20 s for everything. The loop stops waiting at 20 s; a database query that is already running is not cancelled |
+| Size of one request to the model | 32 KB (bytes, checked before each request) |
+| Size of one tool result | 8 KB. Lists lose whole items from the end and say they are truncated |
+| Orders per `get_my_orders` / items per menu | 10 (with `hasMore`) / 25 (with `totalItems`) |
+
+### The spending guard
+
+Before every request to the model the loop estimates its cost and refuses to send it if the estimate does not fit:
+
+- **Input:** every byte of what will be sent (instructions, tool definitions, the question, every tool call and result) counts as a token, plus fixed overheads, times `ASSIST_ESTIMATE_MARGIN`. Tokenizers usually produce fewer tokens than bytes, so this usually over-estimates. It is an estimate, not a guarantee.
+- **Output:** the full `ASSIST_MAX_OUTPUT_TOKENS`, which is also sent as the cap on every request.
+- **Price:** input and output separately, from the price list `ASSIST_PRICED_AS` names in `apps/api/src/assist/budget.ts` (USD per million tokens, Global Standard, checked 2026-10-11). If you deploy a different model or a different deployment type, add its prices there and set `ASSIST_PRICED_AS`. A name with no price means nothing is sent.
+
+| Setting | Default | What it limits |
+|---|---|---|
+| `ASSIST_TURN_BUDGET_USD` | `0.05` | One question |
+| `M0_BUDGET_USD` | `5` | Everything ever sent from this checkout, shared with the probe and the evaluation (`.m0-usage.json`) |
+
+After each request the actual usage the provider reports is charged. If a response has no usage, the estimate is charged, never zero.
+If the provider ever reports more than the estimate, the higher number is charged, a `estimator_violation` warning is logged, and the
+turn stops. If you see one, raise `ASSIST_ESTIMATE_MARGIN`.
+
+This guard protects this app's budget. It is not a promise about your bill, so also set a budget on your Azure subscription.
+The ledger file is safe for any number of processes on one machine; it is not shared between machines.
+
+### A request that was sent but never charged
+
+Each request holds its estimate in the ledger from just before it is sent until its usage is charged. If the API stops in
+between (a crash, or you close the terminal at the wrong moment), the request may still have been processed and billed, so the
+hold stays when you restart, and `pnpm dev` prints `budget: 1 sent request(s) were never settled and stay held`. To clear it:
+
+```bash
+pnpm budget:reservations                                   # lists them: id, time, held amount
+pnpm budget:settle -- <id> --tokens <input>/<output>      # charge what Azure reports for that time
+pnpm budget:settle -- <id> --estimate                      # or charge the amount already held
+```
+
+Find the real token counts in the Azure portal: open your Foundry resource, then **Monitoring**, then **Metrics**, and look
+at the input and output token metrics around that time. Each hold can be settled once; a second settle is refused. There is
+no command that sets a sent request to zero.
+
+## 8. Traces in Jaeger
 
 Open http://localhost:16686, choose the service `tadka-api` and find a `POST` request for `/orders/.../pay`.
 One payment is **15 spans across two services** (`tadka-api` and `tadka-fake-psp`):
@@ -512,7 +672,7 @@ tadka-api      POST
 
 The HTTP spans show only the method (`POST`), not the route.
 
-## 8. Resetting state
+## 9. Resetting state
 
 | You want | Do this | Note |
 |---|---|---|
@@ -521,14 +681,14 @@ The HTTP spans show only the method (`POST`), not the route.
 | A clean demo | Both of the above | **Seeding alone is not enough**: the provider still remembers a key from a previous payment and replays that result |
 | Everything gone | `docker compose --profile observability down -v` | `-v` also deletes the database volume |
 
-## 9. Tests
+## 10. Tests
 
 ```bash
 pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 8 fake-provider tests and 74 API tests pass (82 in all). Your dev database is never touched.
+Expected: 8 fake-provider tests and 132 API tests pass (140 in all). Your dev database is never touched.
 
 | File | What it proves |
 |---|---|
@@ -542,10 +702,16 @@ Expected: 8 fake-provider tests and 74 API tests pass (82 in all). Your dev data
 | `intent-classifier.test.ts` (6) | Each outcome with a fake provider: ok, a valid `other`, invalid output (five shapes), refusal, provider errors; no retry; the cost guards are sent |
 | `assist-intent.test.ts` (11) | Customers only, no identity in the body, one/several/no active orders, a failing lookup is a 500, labels that must not act change nothing in the database, fallbacks per outcome, rules by default |
 | `intent-eval.test.ts` (10) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent, the input estimate counting UTF-8 bytes, an unpriced model refused |
-| `boundaries.test.ts` (4) | `assist` imports only the public orders service, and the model output has no field that can name a user |
+| `boundaries.test.ts` (6) | `assist` and its tools import only the public orders and restaurants services, nothing in `src` imports the demo, and no model output or tool schema has a field that can name a user |
+| `naive-tool-demo.test.ts` (2) | The naive tool leaks Aman's address into Rahul's chat; the real tool returns `not_found` |
+| `assist-reads.test.ts` (5) | Recent orders are newest first with a fixed tie-break, capped, with `hasMore`; a foreign order and an invented id give the same error and the same HTTP 404, and only an internal flag tells them apart; the menu is capped in a fixed order |
+| `tool-executor.test.ts` (10) | Allow-listed fields only; unknown tool, unparsable input, an extra `userId` and a bad id are `invalid_args` with no side effect; a tool not offered to the role looks like an unknown tool; a backend failure is `failed`; ordinary logs are identical for a foreign and an invented id while only the audit log records the difference; the result size cap |
+| `budget-ledger.test.ts` (5) | Separate processes cannot reserve the same allowance; a crash after sending keeps the hold through a restart; a settle applies once, even when two run at the same time; released or unpriced is refused; a half-written temp file is harmless |
+| `agent-loop.test.ts` (29) | Multi-step answers from templates, model prose never shown, one result per call id when parallel calls finish out of order, partial failure, at most 3 at once, each limit on its own, the deadline for a slow tool and a slow model, the output cap on every request, every budget rule, the payload cap separate from the budget, no retry and no tool re-run after a provider error |
+| `assist-chat.test.ts` (5) | `POST /assist/chat` end to end: own orders, Aman's order in Rahul's chat is not found with one audit event, an invented id, customers only, 503 without a model |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
-## 10. The LLM probe
+## 11. The LLM probe
 
 ```bash
 pnpm probe:llm                 # dry run: a fake model, no key, no network, no cost
@@ -638,7 +804,7 @@ What the live call does, and why:
 It prints the deployment name, latency, token usage and cost. One call costs a fraction of a cent. Also set a budget alert on
 your Azure resource group (not required to run the branch): an alert only notifies, while the ledger is what stops the call.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -650,15 +816,19 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `pnpm dev` says `classifier: keyword rules` but you expected the LLM | `AZURE_RESOURCE_NAME` or `AZURE_API_KEY` is empty in `.env`, or `.env` is not in the repository root | Fill both in, then restart `pnpm dev` (section 4) |
 | `POST /assist/intent` returns `{"error":"assistant_unavailable"} [502]` | The model call failed: wrong key or deployment name, quota, network, or the spending guard refused | Check `AZURE_*` in `.env`; check `.m0-usage.json` against `M0_BUDGET_USD`; try `pnpm probe:llm -- --live` |
 | `pnpm eval:intent --live` ends with `budget_stop` rows | A run or ledger cap would have been crossed, so the remaining requests were not sent | Raise `EVAL_BUDGET_USD` or `M0_BUDGET_USD` on purpose, or delete nothing and read the totals in the output |
+| `POST /assist/chat` returns `{"error":"assistant_not_configured"} [503]` | No model is configured | Fill `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`, then restart `pnpm dev` (section 11) |
+| `POST /assist/chat` always answers with `"stopReason":"budget"` | The question's estimate is over `ASSIST_TURN_BUDGET_USD`, the ledger is near `M0_BUDGET_USD`, or `ASSIST_PRICED_AS` names a model with no price | Check those three settings (section 7); `pnpm budget:reservations` shows what is spent and held |
+| `POST /assist/chat` answers with `"stopReason":"provider_error"` | Wrong key or deployment name, quota, or network | Try `pnpm probe:llm -- --live` first (section 11) |
+| `budget: ... sent request(s) were never settled` when `pnpm dev` starts | The API stopped between sending a request and charging it | Settle them as described in section 7 |
 | `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24 or v26; install Node 24 (section 2) |
 | `corepack` is not recognized | Node 25 and later no longer include corepack | Skip corepack and run `npm install -g pnpm@12.11.2` |
 | Everything returns 401 after a restart | The dev signing key is regenerated on every start | Log in again |
-| Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 7) |
+| Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 9) |
 | `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | `--live` without credentials | Fill them in `.env` |
 | No traces in Jaeger | Jaeger is not running, or `OTEL_EXPORTER_OTLP_ENDPOINT` is empty | Start with `--profile observability`; check `.env` |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |
 
-## 12. Teardown
+## 13. Teardown
 
 ```bash
 # Ctrl+C in the pnpm dev terminal, then:

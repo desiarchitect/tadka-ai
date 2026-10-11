@@ -276,9 +276,9 @@ describe('budget gate (section 3b)', () => {
 
 describe('payload cap (bytes) is separate from the budget (USD)', () => {
   it('over 32 KB stops with history_limit even with budget to spare, answering from what it has', async () => {
-    const t = setup([{ calls: [['get_my_orders', {}]] }, { calls: [present('r1')] }], { config: { maxPayloadBytes: 2800, turnBudgetUsd: 100 } });
-    const first = estimateRequest([{ role: 'user', content: 'x' }], t.deps.config);
-    expect(first.payloadBytes).toBeLessThan(2800);
+    // The cap fits the first request (instructions, tools, question) but not the second, which adds the orders result.
+    const cap = estimateRequest([{ role: 'user', content: 'x' }], setup([]).deps.config).payloadBytes + 150;
+    const t = setup([{ calls: [['get_my_orders', {}]] }, { calls: [present('r1')] }], { config: { maxPayloadBytes: cap, turnBudgetUsd: 100 } });
     const r = await t.run();
     expect(r.stopReason).toBe('history_limit');
     expect(r.answer).toContain('Your recent orders');

@@ -35,7 +35,8 @@ function renderData(d: ToolData): string {
   }
   const lines = d.items.map((i) => `- ${i.name}: ${rupees(i.pricePaise)}`);
   const partial = d.truncated ? [`Showing ${d.items.length} of ${d.totalItems} items.`] : [];
-  return [`${d.restaurant.name} (${d.restaurant.city}) menu:`, ...lines, ...partial].join('\n');
+  const pref = d.filteredBy ? [d.items.length ? 'Vegetarian items only, as you asked us to remember.' : 'No vegetarian items on this menu.'] : [];
+  return [`${d.restaurant.name} (${d.restaurant.city}) menu:`, ...lines, ...partial, ...pref].join('\n');
 }
 
 export function renderResult(tool: string, r: ModelResult): string | null {

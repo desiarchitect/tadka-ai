@@ -7,7 +7,9 @@ import type { RestaurantsService } from '../../restaurants/service.js';
 import type { Principal } from '../../shared/principal.js';
 import { MENU_LIMIT, ORDERS_LIMIT, menuView, orderView, type ToolData } from './views.js';
 
-export type ToolServices = { orders: OrdersService; restaurants: RestaurantsService };
+// `prefs`: the customer's saved preferences (EP3), applied here by the application. The model
+// never reads or writes them.
+export type ToolServices = { orders: OrdersService; restaurants: RestaurantsService; prefs?: { diet?: 'vegetarian' } };
 
 type ToolDef = {
   description: string;
@@ -42,7 +44,10 @@ export const TOOLS = {
     input: z.strictObject({ restaurantId: z.uuid() }),
     roles: ['Customer'],
     sideEffect: 'read',
-    run: async (s, _p, { restaurantId }) => menuView(await s.restaurants.menuPage(restaurantId, MENU_LIMIT)),
+    run: async (s, _p, { restaurantId }) => {
+      const vegOnly = s.prefs?.diet === 'vegetarian';
+      return menuView(await s.restaurants.menuPage(restaurantId, MENU_LIMIT, { vegOnly }), vegOnly);
+    },
   }),
 } satisfies Record<string, ToolDef>;
 

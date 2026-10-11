@@ -50,11 +50,11 @@ describe('executor: the happy paths return allow-listed fields only', () => {
     expect(Object.keys((r.modelResult as { data: { order: object } }).data.order).sort()).toEqual(['orderId', 'placedAt', 'restaurantId', 'status', 'totalPaise']);
   });
 
-  it('get_restaurant_menu: item id, name and price, labelled as data', async () => {
+  it('get_restaurant_menu: item id, name, price and veg flag, labelled as data', async () => {
     const r = await executeToolCall(deps().d, rahul, call('get_restaurant_menu', { restaurantId: IDS.spiceGarden }));
     expect(r.status).toBe('ok');
     const data = (r.modelResult as { data: Extract<ToolData, { kind: 'menu' }> }).data;
-    expect(Object.keys(data.items[0]!).sort()).toEqual(['itemId', 'name', 'pricePaise']);
+    expect(Object.keys(data.items[0]!).sort()).toEqual(['itemId', 'name', 'pricePaise', 'veg']);
     expect(data.dataLabel).toMatch(/untrusted_data/);
   });
 });

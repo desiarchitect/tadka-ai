@@ -14,7 +14,7 @@ export function scripted(steps: Step[]) {
       if (s.delayMs) await new Promise((r, j) => { const t = setTimeout(r, s.delayMs); opts.abortSignal?.addEventListener('abort', () => { clearTimeout(t); j(new Error('aborted')); }); });
       if (s.throws) throw s.throws;
       const content = s.calls
-        ? s.calls.map(([toolName, input, callId], k) => ({ type: 'tool-call' as const, toolCallId: callId ?? `call_${i}_${k}`, toolName, input: typeof input === 'string' ? input : JSON.stringify(input) }))
+        ? s.calls.map(([toolName, input, callId], k) => ({ type: 'tool-call' as const, toolCallId: callId ?? `call_${i}_${k}_${Math.random().toString(36).slice(2, 8)}`, toolName, input: typeof input === 'string' ? input : JSON.stringify(input) }))
         : [{ type: 'text' as const, text: s.text ?? '' }];
       return { content, finishReason: { unified: (s.finish ?? (s.calls ? 'tool-calls' : 'stop')) as 'stop', raw: 'x' }, usage: usageOf(s.usage), warnings: [] };
     },

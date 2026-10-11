@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+
+# Install scripts are off unless listed here. None of these is needed:
+# esbuild ships its binary as an optional dependency; protobufjs only prints a notice.
+allowBuilds:
+  esbuild: false
+  protobufjs: false

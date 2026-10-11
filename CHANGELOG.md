@@ -24,6 +24,7 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - CI workflow for GitHub Actions: Node 24, frozen lockfile, typecheck and tests against a Postgres service.
 - `RUNBOOK.md` (how to run this branch, command by command, with install steps for Windows, macOS and Linux) and this changelog.
 - Windows support: file paths built with `fileURLToPath`, and `.gitattributes` keeps LF line endings.
+- PowerShell versions of the install check, Quick start, walkthrough, port cleanup and teardown, so Windows users can use PowerShell or Git Bash.
 - Tests: 41 (33 API, 8 fake provider).
 
 ### Verified

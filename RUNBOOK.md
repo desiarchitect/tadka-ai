@@ -25,8 +25,9 @@ What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, re
 
 Do this before running the first command in section 3. It works on Windows 10/11, macOS and Linux.
 
-> **Windows: run every command in this runbook in Git Bash** (installed with Git below), not in PowerShell or Command Prompt.
-> The commands use bash syntax, and `curl` in PowerShell is a different program.
+> **Windows: you can use either PowerShell or Git Bash.** Setup commands (`git`, `pnpm`, `docker`) are the same in both. Where PowerShell needs
+> different syntax, this runbook gives a PowerShell version next to the bash one: the install check (section 2), Quick start (section 3),
+> the `.env` copy (section 4), the walkthrough (section 5, "In PowerShell") and teardown (section 11). The bash walkthrough also needs `curl` and `jq`; the PowerShell one does not.
 
 What you need:
 
@@ -36,8 +37,8 @@ What you need:
 | Node.js | **24.x or 26.x** (not 22, not 25) | Runs the code. `package.json` requires `>=24 <27`. Node 24 is the long-term-support release; Node 26 is the newest |
 | pnpm | **12.11.2** | The package manager this repository is locked to |
 | Docker with Compose | recent (Docker Desktop on Windows and macOS) | Runs Postgres and Jaeger |
-| `curl` | any | Calls the API in the walkthrough. Included with macOS, Linux and Git Bash |
-| `jq` | any | Reads JSON in the walkthrough |
+| `curl` | any | Calls the API in the bash walkthrough. Included with macOS, Linux and Git Bash. Not needed in PowerShell |
+| `jq` | any | Reads JSON in the bash walkthrough. Not needed in PowerShell |
 
 Also free: about 1 GB of RAM and 1 GB of disk for images, and ports 3000, 4010, 5544, 16686 and 4318.
 No paid account is needed, except for the optional live LLM call (section 9).
@@ -59,13 +60,13 @@ Run the install commands in PowerShell or Windows Terminal. They use `winget`, w
 3. **Docker Desktop.** Download it from the [Docker Desktop for Windows page](https://docs.docker.com/desktop/setup/install/windows-install/)
    and run the installer (or `winget install -e --id Docker.DockerDesktop`). It needs WSL 2 and hardware virtualization turned on in your BIOS/UEFI,
    and Docker recommends 8 GB of RAM. Restart if the installer asks, then open **Docker Desktop** once and wait until it reports that Docker is running.
-4. **jq:**
+4. **jq** (only if you use the bash walkthrough in Git Bash; skip it for PowerShell):
    ```powershell
    winget install --id jqlang.jq -e
    ```
-5. **Close every terminal, then open Git Bash** from the Start menu. A new window is needed so the new programs are on the PATH.
-6. **pnpm**, in Git Bash:
-   ```bash
+5. **Close every terminal, then open a new PowerShell (or Git Bash) window.** A new window is needed so the new programs are on the PATH.
+6. **pnpm**:
+   ```powershell
    npm install -g pnpm@12.11.2
    ```
    pnpm is installed with npm on every system because Node 25 and later no longer include `corepack`.
@@ -89,7 +90,7 @@ Prefer Linux on Windows? Install WSL with Ubuntu, follow the Linux steps below i
 
 ### Check that everything is installed
 
-Run these in your terminal (Git Bash on Windows). Every line should print a version, and the last one should not print an error.
+Run these in your terminal. Every line should print a version, and the last one should not print an error. (In PowerShell, leave out the `curl` and `jq` lines and the `#` comments are fine.)
 
 ```bash
 node -v                  # v24.x or v26.x
@@ -118,6 +119,21 @@ pnpm dev
 ```
 
 Run these in Git Bash on Windows, or any terminal on macOS and Linux. `pnpm dev` stays in the foreground. Open a second terminal for the walkthrough in section 5.
+
+**Windows PowerShell version** (the same steps; `&&` is not used because older PowerShell does not support it):
+
+```powershell
+git clone https://github.com/desiarchitect/tadka-ai.git
+cd tadka-ai
+git checkout ep00-start
+pnpm -v                 # must print 12.11.2
+pnpm install --frozen-lockfile
+Copy-Item .env.example .env
+docker compose --profile observability up -d --wait
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
 
 ## 4. The commands, one by one
 
@@ -289,6 +305,63 @@ Placed -> Confirmed -> Preparing -> OutForDelivery -> Delivered
 Anything else is rejected, including going backwards. Only `pay` (`Placed` to `Confirmed`) is exposed over HTTP in this branch.
 Each change uses a `version` column, so two writers cannot both update the same order.
 
+### In PowerShell
+
+Everything above uses `curl` and `jq`. In PowerShell use this instead. It works in Windows PowerShell 5.1 and PowerShell 7, needs no extra tools, and prints the same JSON.
+Paste the helpers once into the second terminal:
+
+```powershell
+function Call($Method, $Path, $Token, $Body, $Port = 3000) {
+  $p = @{ Method = $Method; Uri = "http://localhost:$Port$Path"; UseBasicParsing = $true; Headers = @{} }
+  if ($Token) { $p.Headers.authorization = "Bearer $Token" }
+  $p.ContentType = 'application/json'
+  $p.Body = if ($Body) { $Body | ConvertTo-Json -Compress } else { '{}' }
+  try { (Invoke-WebRequest @p).Content }
+  catch { "{0} [{1}]" -f ($_.ErrorDetails.Message | ConvertFrom-Json | ConvertTo-Json -Compress), [int]$_.Exception.Response.StatusCode }
+}
+function Login($Email) { (Call POST /auth/login $null @{ email = $Email; password = 'Password123!' } | ConvertFrom-Json).accessToken }
+```
+
+`Call METHOD /path TOKEN BODY PORT` sends the request. Errors print as `{"error":"..."} [status]`, like the bash examples. Then:
+
+```powershell
+Call GET /health                                   # {"status":"ok"}
+Call GET /health $null $null 4010                  # the fake provider
+Call GET /restaurants
+$RAHUL = Login rahul@tadka.test
+(Call GET /orders $RAHUL | ConvertFrom-Json).status -join ','      # Rahul's 5 orders
+
+# Someone else's order looks like it does not exist
+$AMAN = Login aman@tadka.test
+$AMANS_ORDER = (Call GET /orders $AMAN | ConvertFrom-Json)[0].id
+Call GET "/orders/$AMANS_ORDER" $RAHUL             # {"error":"order_not_found"} [404]
+Call GET /orders                                   # {"error":"missing_token"} [401]
+
+# Roles see different things
+$OWNER = Login owner@tadka.test; $ADMIN = Login admin@tadka.test
+(Call GET /orders $OWNER | ConvertFrom-Json).Count     # 5
+(Call GET /orders $ADMIN | ConvertFrom-Json).Count     # 9
+
+# Pay for an order (run it twice: same answer, one charge)
+$ORDER = 'bbbbbbbb-0000-4000-8000-000000000001'
+Call POST "/orders/$ORDER/pay" $RAHUL              # "status":"Confirmed","version":2
+
+# Make the provider misbehave (reset first, as described above)
+Call POST /__levers $null @{ charges = 'decline' } 4010                       # then pay: [402]
+Call POST /__levers $null @{ charges = 'timeout'; timeoutMs = 1000 } 4010     # then pay: Confirmed after about 1 s
+Call POST /__levers $null @{ charges = 'error' } 4010                         # pay: [502]; set 'succeed', pay again: Confirmed
+Call POST /__levers $null @{ charges = 'succeed' } 4010
+
+# Refresh, reuse detection, bad input
+$r = Call POST /auth/login $null @{ email = 'rahul@tadka.test'; password = 'Password123!' } | ConvertFrom-Json
+Call POST /auth/refresh $null @{ refreshToken = $r.refreshToken }             # a new token pair
+Call POST /auth/refresh $null @{ refreshToken = $r.refreshToken }            # {"error":"invalid_refresh_token"} [401]
+Call POST /auth/login $null @{ email = 'nobody@tadka.test'; password = 'bad' }  # [401] invalid_credentials
+Call GET /orders/not-a-uuid $RAHUL                                            # [400] invalid_request
+```
+
+To reset state in PowerShell, press Ctrl+C in the `pnpm dev` window, then run `pnpm db:seed; pnpm dev`, and log in again.
+
 ## 6. Traces in Jaeger
 
 Open http://localhost:16686, choose the service `tadka-api` and find a `POST` request for `/orders/.../pay`.
@@ -434,9 +507,9 @@ your Azure resource group (not required to run the branch): an alert only notifi
 |---|---|---|
 | `pnpm db:migrate` fails right after `docker compose up` | Postgres was not ready yet | Use `up -d --wait`, or wait a few seconds and re-run |
 | `container name ... is already in use` | A stack from another checkout uses the same fixed container names | `docker compose down -v` in that other checkout, or `docker rm -f tadka-ai-postgres tadka-ai-jaeger` |
-| `EADDRINUSE` on 3000 or 4010 | A previous `pnpm dev` is still running, or another program uses the port | Stop the old process, then start again. On Windows (Git Bash): `netstat -ano \| findstr :3000` shows the process id, then `taskkill //PID <id> //F` (the double slashes are needed in Git Bash) |
+| `EADDRINUSE` on 3000 or 4010 | A previous `pnpm dev` is still running, or another program uses the port | Stop the old process, then start again. On Windows PowerShell: `Get-NetTCPConnection -LocalPort 3000 \| Select-Object OwningProcess` shows the process id, then `Stop-Process -Id <id> -Force`. In Git Bash: `netstat -ano \| findstr :3000`, then `taskkill //PID <id> //F` (the double slashes are needed in Git Bash) |
 | `docker: error during connect` or `failed to connect to the docker API` | Docker is not running | Start Docker Desktop and wait until it says Docker is running |
-| `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal (Git Bash on Windows), then check with the list at the end of section 2 |
+| `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal, then check with the list at the end of section 2 |
 | `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24 or v26; install Node 24 (section 2) |
 | `corepack` is not recognized | Node 25 and later no longer include corepack | Skip corepack and run `npm install -g pnpm@12.11.2` |
 | Everything returns 401 after a restart | The dev signing key is regenerated on every start | Log in again |
@@ -451,5 +524,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 # Ctrl+C in the pnpm dev terminal, then:
 docker compose --profile observability down -v
 ```
+
+The same two steps work in PowerShell.
 
 This removes both containers, the network and the database volume.

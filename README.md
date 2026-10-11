@@ -58,20 +58,22 @@ pnpm typecheck
 
 ```bash
 pnpm probe:llm             # dry run with a fake model: no key, no network, no cost
-pnpm probe:llm -- --live   # ONE real call to OpenAI gpt-4o-mini
+pnpm probe:llm -- --live   # ONE real call to gpt-5.4-mini on Microsoft Foundry
 ```
 
-The live call needs `OPENAI_API_KEY` in `.env`. It sends one synthetic message, caps output at
-150 tokens, sets `maxRetries: 0`, and asks OpenAI not to store the response (`store: false`).
+The live call needs `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`, and a Foundry deployment
+of gpt-5.4-mini named `gpt-5.4-mini` (or set `AZURE_DEPLOYMENT`). It sends one synthetic message,
+caps output at 400 tokens, turns reasoning off (`reasoningEffort: 'none'`), sets `maxRetries: 0`,
+and asks the Responses API not to store the response (`store: false`).
 Before sending, it checks a local ledger (`.m0-usage.json`) and refuses if the worst-case cost
-would push total spend past `M0_BUDGET_USD` (default 5). Also set a budget alert on your OpenAI
-project: an alert only notifies; the ledger is what stops the call.
+would push total spend past `M0_BUDGET_USD` (default 5). Also set an Azure budget alert on the
+resource group: an alert only notifies; the ledger is what stops the call.
 
 ## Costs
 
 Everything runs locally for free. The only paid step is the optional live LLM call: at
-gpt-4o-mini's listed $0.15 / $0.60 per 1M input / output tokens, one probe call costs a small
-fraction of a cent.
+gpt-5.4-mini's Global Standard price of $0.75 / $4.50 per 1M input / output tokens, one probe call
+costs about a tenth of a cent at most.
 
 ## Teardown
 

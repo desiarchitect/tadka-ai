@@ -1,10 +1,14 @@
 // Hard spending cap for live probe calls. A provider-side alert only notifies; this
 // refuses the call BEFORE it is sent if the worst case could cross the cap.
-// Prices: gpt-4o-mini, USD per 1M tokens, from developers.openai.com/api/docs/models/gpt-4o-mini
-// (checked 2026-10-11). Update them if the page changes.
+// Prices: Microsoft Foundry, Global Standard deployment, USD per 1M tokens, from the Azure
+// Retail Prices API as shown on azurespeed.com (checked 2026-10-11). Data Zone deployments cost
+// about 10-20% more. Update them if the price changes.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
-export const PRICES = { 'gpt-4o-mini': { inputPerM: 0.15, outputPerM: 0.6 } } as const;
+export const PRICES = {
+  'gpt-5.4-mini': { inputPerM: 0.75, outputPerM: 4.5 },
+  'gpt-5.4-nano': { inputPerM: 0.2, outputPerM: 1.25 },
+} as const;
 export type PricedModel = keyof typeof PRICES;
 
 type Ledger = { budgetUsd: number; calls: { at: string; model: string; inputTokens: number; outputTokens: number; costUsd: number }[] };

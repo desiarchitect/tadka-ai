@@ -19,6 +19,7 @@ describe('triage (fake provider)', () => {
     expect(call.maxOutputTokens).toBe(MAX_OUTPUT_TOKENS);
     expect(call.temperature).toBe(0);
     expect(call.responseFormat?.type).toBe('json');
+    expect(call.providerOptions?.azure).toEqual({ store: false, reasoningEffort: 'none' });
     expect(model.doGenerateCalls.length).toBe(1);
   });
 
@@ -30,12 +31,12 @@ describe('triage (fake provider)', () => {
 describe('budget ledger', () => {
   it('refuses a call whose worst case would cross the cap, before it is sent', () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'm0-')), 'usage.json'), 0.0001);
-    expect(() => ledger.assertAffordable('gpt-4o-mini', 2000, 150)).toThrow(/exceeds cap/);
+    expect(() => ledger.assertAffordable('gpt-5.4-mini', 2000, 400)).toThrow(/exceeds cap/);
   });
 
   it('records actual cost from usage', () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'm0-')), 'usage.json'), 5);
-    expect(ledger.record('gpt-4o-mini', 1_000_000, 1_000_000)).toBeCloseTo(0.75);
-    expect(ledger.spent()).toBeCloseTo(0.75);
+    expect(ledger.record('gpt-5.4-mini', 1_000_000, 1_000_000)).toBeCloseTo(5.25);
+    expect(ledger.spent()).toBeCloseTo(5.25);
   });
 });

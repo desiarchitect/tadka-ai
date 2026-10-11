@@ -12,7 +12,7 @@
     "probe:llm": "node --env-file-if-exists=../../.env --import tsx scripts/probe-llm.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.91",
+    "@ai-sdk/azure": "4.0.99",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.223.0",
     "@opentelemetry/instrumentation-http": "0.223.0",

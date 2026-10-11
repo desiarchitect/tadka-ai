@@ -5,8 +5,8 @@ This is the `ep00-start` branch of [tadka-ai](https://github.com/desiarchitect/t
 A small food-delivery backend used as the running project of an AI engineering series.
 One TypeScript codebase: a modular monolith API plus a fake payment provider.
 
-> Status: **M0 feasibility probe** (scratch build). Not the public series repository.
-> Not included yet, on purpose: chat, tools, RAG, the agent loop, refund operations.
+> Status: baseline for the series. Not included yet, on purpose: chat, tools, RAG, the agent loop, refund operations.
+> To run it, follow [RUNBOOK.md](RUNBOOK.md). To see what this branch added, read [CHANGELOG.md](CHANGELOG.md).
 
 ## What is here
 
@@ -25,12 +25,15 @@ One TypeScript codebase: a modular monolith API plus a fake payment provider.
 
 ## Run it
 
+The full, explained version is in [RUNBOOK.md](RUNBOOK.md). The short version:
+
 ```bash
-git clone <repo> tadka-ts && cd tadka-ts
+git clone https://github.com/desiarchitect/tadka-ai.git && cd tadka-ai
+git checkout ep00-start
 corepack enable
 pnpm install --frozen-lockfile
 cp .env.example .env
-docker compose --profile observability up -d
+docker compose --profile observability up -d --wait
 pnpm db:migrate && pnpm db:seed
 pnpm dev                       # API on :3000, fake PSP on :4010
 ```

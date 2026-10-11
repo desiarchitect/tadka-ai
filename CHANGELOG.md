@@ -25,10 +25,6 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - `RUNBOOK.md` (how to run this branch, command by command) and this changelog.
 - Tests: 41 (33 API, 8 fake provider).
 
-### Changed
-- Compose containers are named `tadka-ai-postgres` and `tadka-ai-jaeger` (they were `tadka-ts-*` in the scratch build), so they no longer clash with an older checkout.
-- The LLM provider moved from OpenAI `gpt-4o-mini` to Microsoft Foundry `gpt-5.4-mini` before this branch was published, because `gpt-4o-mini` is deprecated on Foundry. The call site and the spending guard are unchanged apart from the model settings above.
-
 ### Verified
 - On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 41 of 41 tests.
 - The dry-run probe, and the refusal to run `--live` without credentials.

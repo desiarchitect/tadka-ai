@@ -73,7 +73,7 @@ Creates your local settings. `.env` is git-ignored: never commit it.
 | `FAKE_PSP_URL` | `http://localhost:4010` | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Where traces are sent. Delete or empty it to run without tracing |
 | `AZURE_RESOURCE_NAME`, `AZURE_API_KEY` | empty | Only for the live LLM call (section 9) |
-| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Name of your model deployment on Microsoft Foundry |
+| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Name of the model deployment. The series uses `gpt-5.4-mini` on Microsoft Foundry |
 | `M0_BUDGET_USD` | `5` | Hard spending cap enforced by the probe |
 
 The database credentials are local-only defaults and match `docker-compose.yml`.
@@ -254,15 +254,15 @@ Expected: 8 fake-provider tests and 33 API tests pass. Your dev database is neve
 
 ```bash
 pnpm probe:llm                 # dry run: a fake model, no key, no network, no cost
-pnpm probe:llm -- --live       # ONE real call to your Foundry deployment
+pnpm probe:llm -- --live       # ONE real call to the series model (gpt-5.4-mini on Microsoft Foundry)
 ```
 
 The dry run prints a typed answer (`intent`, `language`, `needsHuman`, `summary`) from a fake model. It proves the
 code path and the schema, not the provider.
 
-The live run needs a Microsoft Foundry resource with a `gpt-5.4-mini` deployment (type Global Standard):
+The series uses `gpt-5.4-mini` deployed on Microsoft Foundry (deployment type Global Standard). To run the live call you need your own Foundry resource with that deployment:
 
-1. Put `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`. If your deployment has a different name, set `AZURE_DEPLOYMENT` too.
+1. Put `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`. If you named your deployment something else, set `AZURE_DEPLOYMENT` too.
 2. Run `pnpm probe:llm -- --live`.
 
 What the live call does, and why:
@@ -276,7 +276,7 @@ What the live call does, and why:
 | Budget ledger `.m0-usage.json` | Before sending, the probe adds the worst-case cost of this call to what you have spent. If that would pass `M0_BUDGET_USD` (default 5), it refuses and sends nothing |
 
 It prints the deployment name, latency, token usage and cost. One call costs a fraction of a cent. Also set a budget alert on
-your Azure resource group: an alert only notifies, while the ledger is what stops the call.
+your Azure resource group (not required to run the branch): an alert only notifies, while the ledger is what stops the call.
 
 ## 10. Troubleshooting
 

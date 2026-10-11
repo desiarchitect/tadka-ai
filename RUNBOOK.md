@@ -55,7 +55,7 @@ Run the install commands in PowerShell or Windows Terminal. They use `winget`, w
    winget install --id OpenJS.NodeJS.LTS -e --version 24.20.0
    ```
    If that exact version is not offered, download the Node 24 Windows installer from [nodejs.org](https://nodejs.org/en/download) and choose version 24.
-   Newer Node versions will not work.
+   Newer Node versions will not work. If `node -v` already prints v25 or higher, uninstall that Node first (`winget uninstall OpenJS.NodeJS`) and open a new terminal before installing Node 24.
 3. **Docker Desktop.** Download it from the [Docker Desktop for Windows page](https://docs.docker.com/desktop/setup/install/windows-install/)
    and run the installer (or `winget install -e --id Docker.DockerDesktop`). It needs WSL 2 and hardware virtualization turned on in your BIOS/UEFI,
    and Docker recommends 8 GB of RAM. Restart if the installer asks, then open **Docker Desktop** once and wait until it reports that Docker is running.
@@ -438,6 +438,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `docker: error during connect` or `failed to connect to the docker API` | Docker is not running | Start Docker Desktop and wait until it says Docker is running |
 | `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal (Git Bash on Windows), then check with the list at the end of section 2 |
 | `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24; install Node 24 (section 2) |
+| `corepack` is not recognized | Node 25 and later no longer include corepack | Install Node 24, then `npm install -g pnpm@12.11.2` |
 | Everything returns 401 after a restart | The dev signing key is regenerated on every start | Log in again |
 | Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 7) |
 | `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | `--live` without credentials | Fill them in `.env` |

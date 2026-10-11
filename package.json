@@ -2,7 +2,9 @@
   "name": "tadka-ts",
   "private": true,
   "packageManager": "pnpm@12.11.2",
-  "engines": { "node": ">=24 <27" },
+  "engines": {
+    "node": ">=24 <27"
+  },
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run typecheck",
@@ -11,6 +13,8 @@
     "db:migrate": "pnpm --filter @tadka/api db:migrate",
     "db:seed": "pnpm --filter @tadka/api db:seed",
     "probe:llm": "pnpm --filter @tadka/api probe:llm",
-    "eval:intent": "pnpm --filter @tadka/api eval:intent"
+    "eval:intent": "pnpm --filter @tadka/api eval:intent",
+    "budget:reservations": "pnpm --filter @tadka/api budget:reservations",
+    "budget:settle": "pnpm --filter @tadka/api budget:settle"
   }
 }

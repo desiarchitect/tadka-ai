@@ -10,7 +10,9 @@
     "db:migrate": "node --env-file-if-exists=../../.env --import tsx scripts/migrate.ts",
     "db:seed": "node --env-file-if-exists=../../.env --import tsx scripts/seed.ts",
     "probe:llm": "node --env-file-if-exists=../../.env --import tsx scripts/probe-llm.ts",
-    "eval:intent": "node --env-file-if-exists=../../.env --import tsx scripts/eval-intent.ts"
+    "eval:intent": "node --env-file-if-exists=../../.env --import tsx scripts/eval-intent.ts",
+    "budget:reservations": "node --env-file-if-exists=../../.env --import tsx scripts/budget.ts reservations",
+    "budget:settle": "node --env-file-if-exists=../../.env --import tsx scripts/budget.ts settle"
   },
   "dependencies": {
     "@ai-sdk/azure": "4.0.99",

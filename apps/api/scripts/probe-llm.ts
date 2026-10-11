@@ -9,7 +9,7 @@ import { BudgetLedger } from '../src/assist/budget.js';
 const MODEL = 'gpt-5.4-mini' as const; // the model priced in the ledger
 // The Foundry deployment name. Name the deployment after the model: the AI SDK reads the
 // name to decide that this is a reasoning model.
-const DEPLOYMENT = process.env.AZURE_DEPLOYMENT ?? MODEL;
+const DEPLOYMENT = process.env.AZURE_DEPLOYMENT || MODEL;
 const SYNTHETIC_MESSAGE = 'Mera order 40 minute se late hai, Paneer Butter Masala abhi tak nahi aaya. Kab aayega?';
 const live = process.argv.includes('--live');
 

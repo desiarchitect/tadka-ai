@@ -5,6 +5,34 @@ and leaves the earlier sections alone, so this file always tells the whole story
 
 Format: Added, Changed, Fixed, Removed. "Verified" lines say what was actually run.
 
+## ep01-structured-intent - 2026-10-11
+
+Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
+
+### Added
+- `GET /assist/order-status?orderId=`: a deterministic route with no LLM. The verified principal goes to the orders service, which enforces ownership: someone else's order is 404, no token is 401, a malformed id is 400.
+- `POST /assist/intent`: free text in, one of five labels out (`order_status`, `cancel_order`, `refund_request`, `menu_question`, `other`). Customers only (owner and admin tokens get 403). The body is `{ "text" }` and nothing else, so no identity can come from the request or the model.
+- `src/assist/intent.ts`: the strict one-field schema, and a keyword rules baseline that is blind to negation on purpose.
+- `src/assist/classifier.ts`: the LLM classifier (`generateText` with `Output.object`, reasoning off, `maxRetries: 0`, 100-token cap). Every call ends in one outcome: `ok`, `refusal`, `invalid_output` or `provider_error`. A failure is never counted as the valid label `other`.
+- `src/assist/next-step.ts`: the application decides what happens after a label. `order_status` lists the caller's own active orders (one, several or none; it never guesses between several); cancel, refund and menu are unsupported in this episode; `other` asks for clarification. No label changes an order. A failing order lookup is a safe 500, not "no orders".
+- `OrdersService.listActive`: the caller's orders that are not Delivered or Cancelled.
+- `POST /assist/intent` uses the Foundry model when `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` are set, behind the spending ledger; otherwise it uses the keyword rules. The response says which one answered.
+- Evaluation: `pnpm eval:intent` over 40 frozen synthetic messages (19 Hinglish, 5 hard cases). A separate 8-message dev set is used for tuning. Failures count as wrong and are reported apart from a valid `other`. The dry run uses a stand-in model and checks the harness only; `--live` measures the real deployment and writes per-message results (outcome, tokens, cost, latency) to `.eval-runs/`.
+- Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed.
+- `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
+- Tests: 80 (72 API, 8 fake provider), 39 of them new.
+- `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
+
+### Changed
+- The runbook is now for this branch; sections after the walkthrough moved down by one number.
+
+### Verified
+- Typecheck and 80 of 80 tests on Node 24 and Node 26.
+- On a local run: both new routes in bash and PowerShell, the dry-run evaluation (rules 24 of 40, hard cases 0 of 5).
+
+### Not in this branch
+- Tools, the agent loop, conversations, RAG, refunds, and any action taken from a classification. They arrive in later episode branches.
+
 ## ep00-start - 2026-10-11
 
 First branch. Starts from `main` (overview only). Baseline backend plus one structured LLM call.

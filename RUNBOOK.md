@@ -1,13 +1,19 @@
-# Runbook: `ep00-start`
+# Runbook: `ep01-structured-intent`
 
 Everything you need to run this branch, what each command does, and what you should see.
 Every command below was run on a clean checkout before this runbook was written.
 
 ## 1. What this branch is
 
-`ep00-start` is the baseline of the series: a small food-delivery backend with login, restaurants,
-orders and a charge through a fake payment provider. It also holds one structured LLM call (the "probe")
-that proves the model provider is reachable.
+`ep01-structured-intent` is episode 1: **not every AI feature is an agent**. It starts from the baseline backend
+(`ep00-start`: login, restaurants, orders, a charge through a fake payment provider) and adds one idea:
+
+> The model classifies. The application decides. The backend owns the truth.
+
+A structured request ("status of order X") is answered by plain code with no model. A free-text message
+("cancel mat karna, bas status batao") is classified into one of five labels, first by keyword rules and then by an LLM with
+typed output, and you measure both on the same 40 messages. Whatever the label, the application, not the model, decides
+what happens next, and nothing here cancels, refunds or changes an order.
 
 What you will see when it runs:
 
@@ -16,10 +22,12 @@ What you will see when it runs:
 | A REST API with login, token refresh, restaurants, orders and payment | `http://localhost:3000` |
 | A fake payment provider you can make succeed, decline, time out or fail on demand | `http://localhost:4010` |
 | One request traced across both processes | Jaeger at `http://localhost:16686` |
-| 41 passing tests (33 API + 8 fake provider) | `pnpm test` |
 | One typed answer from a language model | `pnpm probe:llm` |
+| A deterministic order-status route and a free-text intent route | Section 6 |
+| Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
+| 80 passing tests (72 API + 8 fake provider) | `pnpm test` |
 
-What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, refunds. Those arrive in later episode branches.
+What is **not** in this branch, on purpose: tools, the agent loop, conversations, RAG, refunds, any action taken from a message. Those arrive in later episode branches.
 
 ## 2. Install these first
 
@@ -27,7 +35,7 @@ Do this before running the first command in section 3. It works on Windows 10/11
 
 > **Windows: you can use either PowerShell or Git Bash.** Setup commands (`git`, `pnpm`, `docker`) are the same in both. Where PowerShell needs
 > different syntax, this runbook gives a PowerShell version next to the bash one: the install check (section 2), Quick start (section 3),
-> the `.env` copy (section 4), the walkthrough (section 5, "In PowerShell") and teardown (section 11). The bash walkthrough also needs `curl` and `jq`; the PowerShell one does not.
+> the `.env` copy (section 4), the walkthrough (section 5, "In PowerShell") and teardown (section 12). The bash walkthrough also needs `curl` and `jq`; the PowerShell one does not.
 
 What you need:
 
@@ -41,7 +49,7 @@ What you need:
 | `jq` | any | Reads JSON in the bash walkthrough. Not needed in PowerShell |
 
 Also free: about 1 GB of RAM and 1 GB of disk for images, and ports 3000, 4010, 5544, 16686 and 4318.
-No paid account is needed, except for the optional live LLM call (section 9).
+No paid account is needed, except for the optional live LLM call (section 10).
 
 ### Windows 10/11
 
@@ -109,7 +117,7 @@ If `node -v` prints anything other than v24 or v26, fix that first. Everything a
 
 ```bash
 git clone https://github.com/desiarchitect/tadka-ai.git && cd tadka-ai
-git checkout ep00-start
+git checkout ep01-structured-intent
 pnpm -v                 # must print 12.11.2 (see section 2 if it does not)
 pnpm install --frozen-lockfile
 cp .env.example .env
@@ -125,7 +133,7 @@ Run these in Git Bash on Windows, or any terminal on macOS and Linux. `pnpm dev`
 ```powershell
 git clone https://github.com/desiarchitect/tadka-ai.git
 cd tadka-ai
-git checkout ep00-start
+git checkout ep01-structured-intent
 pnpm -v                 # must print 12.11.2
 pnpm install --frozen-lockfile
 Copy-Item .env.example .env
@@ -137,7 +145,7 @@ pnpm dev
 
 ## 4. The commands, one by one
 
-### `git checkout ep00-start`
+### `git checkout ep01-structured-intent`
 Switches to this episode's branch. Each episode lives on its own branch, so this is the code exactly as it is
 at the end of this episode. `main` only holds the overview.
 
@@ -169,9 +177,10 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
 | `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
-| `AZURE_RESOURCE_NAME` | empty | Only for `--live` | The name of your Azure resource. See section 9 |
-| `AZURE_API_KEY` | empty | Only for `--live` | KEY 1 of that resource. See section 9 |
-| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Only for `--live` | The name you gave the model deployment. See section 9 |
+| `AZURE_RESOURCE_NAME` | empty | Only for `--live` | The name of your Azure resource. See section 10 |
+| `AZURE_API_KEY` | empty | Only for `--live` | KEY 1 of that resource. See section 10 |
+| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Only for `--live` | The name you gave the model deployment. See section 10 |
+| `EVAL_BUDGET_USD` | `0.5` | No | Spending cap for one `pnpm eval:intent --live` run (section 6) |
 | `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe |
 
 Everything except the three `AZURE_*` values already works as copied. You can run the whole branch, including all tests and
@@ -214,7 +223,7 @@ Starts both apps in parallel:
 
 On start the API prints `JWT_PRIVATE_JWK unset: using a fresh dev signing key`. That means tokens are signed with a key
 created at start-up, so **every restart invalidates all tokens**. Log in again after a restart.
-The fake provider keeps its state in memory, so a restart is a clean slate for it (see section 7).
+The fake provider keeps its state in memory, so a restart is a clean slate for it (see section 8).
 
 ## 5. Walkthrough: what to run and what you should see
 
@@ -364,7 +373,127 @@ Call GET /orders/not-a-uuid $RAHUL                                            # 
 
 To reset state in PowerShell, press Ctrl+C in the `pnpm dev` window, then run `pnpm db:seed; pnpm dev`, and log in again.
 
-## 6. Traces in Jaeger
+## 6. EP1: classify free text
+
+Everything here uses the walkthrough's `login` helper (bash) or the `Call` and `Login` helpers (PowerShell) from section 5.
+Run `pnpm db:seed` and restart `pnpm dev` first if you changed any orders earlier.
+
+### Which classifier is the route using?
+
+When `pnpm dev` starts it prints one line:
+
+- `POST /assist/intent classifier: keyword rules (no AZURE_* settings)`: no key needed. The route uses the keyword rules.
+- `POST /assist/intent classifier: LLM (Foundry)`: `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` are set in `.env`. The route uses your model deployment, behind the spending guard.
+
+Every response says which one answered, in `"classifier": "rules"` or `"classifier": "llm"`.
+
+### Demo 1: no LLM at all
+
+A structured request is answered by plain code. The verified token goes to the orders service, which checks ownership.
+
+```bash
+RAHUL=$(login rahul@tadka.test)
+ORDER=bbbbbbbb-0000-4000-8000-000000000001
+curl -s -w ' [%{http_code}]\n' "localhost:3000/assist/order-status?orderId=$ORDER" -H "authorization: Bearer $RAHUL"
+```
+
+Result: `{"orderId":"bbbbbbbb-0000-4000-8000-000000000001","status":"Placed"} [200]`.
+Another customer's order id returns `{"error":"order_not_found"} [404]`, and no token returns `{"error":"missing_token"} [401]`.
+
+```powershell
+$RAHUL = Login rahul@tadka.test
+Call GET "/assist/order-status?orderId=bbbbbbbb-0000-4000-8000-000000000001" $RAHUL
+```
+
+### Demo 2: free text
+
+```bash
+ask() {
+  curl -s -w ' [%{http_code}]\n' -XPOST localhost:3000/assist/intent -H "authorization: Bearer $RAHUL" \
+    -H 'content-type: application/json' -d "{\"text\":\"$1\"}"
+}
+ask "Can you cancel my order, please?"
+ask "cancel mat karna, bas status batao"
+```
+
+```powershell
+function Ask($Token, $Text) { Call POST /assist/intent $Token @{ text = $Text } }
+Ask $RAHUL 'Can you cancel my order, please?'
+Ask $RAHUL 'cancel mat karna, bas status batao'
+```
+
+The first message is a cancel request. The second one says "cancel" but means the opposite: the customer wants the status.
+With the keyword rules both come back as `cancel_order`, because the word "cancel" wins and a keyword cannot read "mat karna".
+The response for a cancel label is always the same: `{"action":"unsupported", ...}`. **No order is cancelled.**
+
+With a model configured, the second message should come back as `order_status`. Whether it does is exactly what the evaluation below measures.
+
+### What the application does with each label
+
+The model returns one field, `{"intent": ...}`. Application code, in `src/assist/next-step.ts`, decides the rest:
+
+| Label | What the application does |
+|---|---|
+| `order_status` | Looks up the caller's own active orders. One: returns its status. Several: lists them and asks which one (it never guesses). None: says so. If the lookup itself fails you get a 500, never "no orders" |
+| `cancel_order` | Nothing is cancelled. Returns `unsupported` |
+| `refund_request` | Nothing is refunded. Returns `unsupported` |
+| `menu_question` | Returns `unsupported` in this episode |
+| `other` | Asks the customer to say more |
+
+Rahul has four active orders, so `order_status` returns `"action":"choose_order"` with those four.
+
+### Outcomes: a failure is not the label "other"
+
+Every call to the model ends in exactly one outcome, returned as `"outcome"`:
+
+| Outcome | Meaning | What the route returns |
+|---|---|---|
+| `ok` | The model returned a valid intent (this includes a valid `other`) | 200 with the intent and the next step |
+| `refusal` | The provider refused or filtered the request | 200 with a safe fallback, nothing executed |
+| `invalid_output` | Not JSON, an unknown label, an extra field, or plain prose | 200 with a safe fallback, nothing executed |
+| `provider_error` | Timeout, bad key, quota, network, or the spending guard refused | 502 `assistant_unavailable` |
+
+Only customers can use the route. An owner or admin token returns `{"error":"customers_only"} [403]`, and a body with an extra field such as `userId` returns 400:
+the identity always comes from the token.
+
+### Demo 3: measure it
+
+```bash
+pnpm eval:intent              # dry run, no key, no cost
+pnpm eval:intent -- --live    # one request per message to your model deployment
+```
+
+The evaluation set is `apps/api/eval/intents.eval.json`: 40 synthetic messages, 19 of them Hinglish, with 5 deliberately hard cases such as
+"cancel mat karna, bas status batao". The expected label of every message was fixed before the first comparison. A separate set of 8 messages
+(`intents.dev.json`) is where the rules and the prompt were written, so the evaluation set stays untouched.
+
+The dry run prints the rules' real score and a **stand-in** for the model: a fake that repeats the rules' answers. It checks that the harness works.
+It tells you nothing about a real model. The rules score 24 of 40 (60%), and they miss all 5 hard cases:
+
+```
+rules    24/40     60%   English 47.6%   Hinglish 73.7%   hard cases 0/5
+```
+
+Under it you get a list of every miss, as `expected -> got`. For a real number, run `--live`. It prints the same table for the model, how many
+requests ended in each outcome, tokens, cost and latency, and writes the full per-message results to `.eval-runs/`.
+
+Read the result honestly. A model that returns valid JSON has not shown it is right: a valid label can still be the wrong one. 40 messages show
+how each method behaves on these 40 messages. They are not an accuracy figure for production.
+
+### The spending guard on the live run
+
+`--live` sends one request per message (40) and is guarded twice. Before each request it adds what has actually been spent so far to a
+conservative worst case for the next request, and stops if that could cross either cap:
+
+| Setting | Default | What it limits |
+|---|---|---|
+| `EVAL_BUDGET_USD` | `0.5` | This run only |
+| `M0_BUDGET_USD` | `5` | Everything ever sent from this checkout (the ledger file `.m0-usage.json`) |
+
+When a cap would be crossed the run stops without sending that request, marks the rest `budget_stop`, and does not retry.
+Requests use `maxRetries: 0` and a 100-token output cap, and only synthetic messages are sent.
+
+## 7. Traces in Jaeger
 
 Open http://localhost:16686, choose the service `tadka-api` and find a `POST` request for `/orders/.../pay`.
 One payment is **15 spans across two services** (`tadka-api` and `tadka-fake-psp`):
@@ -383,7 +512,7 @@ tadka-api      POST
 
 The HTTP spans show only the method (`POST`), not the route.
 
-## 7. Resetting state
+## 8. Resetting state
 
 | You want | Do this | Note |
 |---|---|---|
@@ -392,14 +521,14 @@ The HTTP spans show only the method (`POST`), not the route.
 | A clean demo | Both of the above | **Seeding alone is not enough**: the provider still remembers a key from a previous payment and replays that result |
 | Everything gone | `docker compose --profile observability down -v` | `-v` also deletes the database volume |
 
-## 8. Tests
+## 9. Tests
 
 ```bash
 pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 8 fake-provider tests and 33 API tests pass. Your dev database is never touched.
+Expected: 8 fake-provider tests and 72 API tests pass (80 in all). Your dev database is never touched.
 
 | File | What it proves |
 |---|---|
@@ -408,9 +537,15 @@ Expected: 8 fake-provider tests and 33 API tests pass. Your dev database is neve
 | `orders.test.ts` (6) | Customers see only their orders, other people's orders return 404, owners see no address, admins see all, the state machine rejects bad moves |
 | `payments.test.ts` (5) | Cross-user payment is refused, timeout is resolved by lookup, error then retry charges once, paying twice is a no-op, the money constraint |
 | `triage.test.ts` (4) | The LLM call returns a typed object and rejects a bad shape; the budget guard refuses before sending |
+| `assist-order-status.test.ts` (4) | The no-LLM route: own order, someone else's is 404, no token is 401, a bad id is 400 |
+| `intent-rules.test.ts` (6) | The five-label schema rejects unknown labels and extra fields; the keyword rules, their documented blind spot (negation) and the dev set |
+| `intent-classifier.test.ts` (6) | Each outcome with a fake provider: ok, a valid `other`, invalid output (five shapes), refusal, provider errors; no retry; the cost guards are sent |
+| `assist-intent.test.ts` (11) | Customers only, no identity in the body, one/several/no active orders, a failing lookup is a 500, labels that must not act change nothing in the database, fallbacks per outcome, rules by default |
+| `intent-eval.test.ts` (8) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent |
+| `boundaries.test.ts` (4) | `assist` imports only the public orders service, and the model output has no field that can name a user |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
-## 9. The LLM probe
+## 10. The LLM probe
 
 ```bash
 pnpm probe:llm                 # dry run: a fake model, no key, no network, no cost
@@ -503,7 +638,7 @@ What the live call does, and why:
 It prints the deployment name, latency, token usage and cost. One call costs a fraction of a cent. Also set a budget alert on
 your Azure resource group (not required to run the branch): an alert only notifies, while the ledger is what stops the call.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -512,6 +647,9 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `EADDRINUSE` on 3000 or 4010 | A previous `pnpm dev` is still running, or another program uses the port | Stop the old process, then start again. On Windows PowerShell: `Get-NetTCPConnection -LocalPort 3000 \| Select-Object OwningProcess` shows the process id, then `Stop-Process -Id <id> -Force`. In Git Bash: `netstat -ano \| findstr :3000`, then `taskkill //PID <id> //F` (the double slashes are needed in Git Bash) |
 | `docker: error during connect` or `failed to connect to the docker API` | Docker is not running | Start Docker Desktop and wait until it says Docker is running |
 | `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal, then check with the list at the end of section 2 |
+| `pnpm dev` says `classifier: keyword rules` but you expected the LLM | `AZURE_RESOURCE_NAME` or `AZURE_API_KEY` is empty in `.env`, or `.env` is not in the repository root | Fill both in, then restart `pnpm dev` (section 4) |
+| `POST /assist/intent` returns `{"error":"assistant_unavailable"} [502]` | The model call failed: wrong key or deployment name, quota, network, or the spending guard refused | Check `AZURE_*` in `.env`; check `.m0-usage.json` against `M0_BUDGET_USD`; try `pnpm probe:llm -- --live` |
+| `pnpm eval:intent --live` ends with `budget_stop` rows | A run or ledger cap would have been crossed, so the remaining requests were not sent | Raise `EVAL_BUDGET_USD` or `M0_BUDGET_USD` on purpose, or delete nothing and read the totals in the output |
 | `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24 or v26; install Node 24 (section 2) |
 | `corepack` is not recognized | Node 25 and later no longer include corepack | Skip corepack and run `npm install -g pnpm@12.11.2` |
 | Everything returns 401 after a restart | The dev signing key is regenerated on every start | Log in again |
@@ -520,7 +658,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | No traces in Jaeger | Jaeger is not running, or `OTEL_EXPORTER_OTLP_ENDPOINT` is empty | Start with `--profile observability`; check `.env` |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |
 
-## 11. Teardown
+## 12. Teardown
 
 ```bash
 # Ctrl+C in the pnpm dev terminal, then:

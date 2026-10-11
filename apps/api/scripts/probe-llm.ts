@@ -5,6 +5,7 @@ import { createAzure } from '@ai-sdk/azure';
 import { MockLanguageModelV4 } from 'ai/test';
 import { triage, MAX_OUTPUT_TOKENS } from '../src/assist/triage.js';
 import { BudgetLedger } from '../src/assist/budget.js';
+import { fileURLToPath } from 'node:url';
 
 const MODEL = 'gpt-5.4-mini' as const; // the model priced in the ledger
 // The Foundry deployment name. Name the deployment after the model: the AI SDK reads the
@@ -32,7 +33,7 @@ if (!process.env.AZURE_API_KEY || !process.env.AZURE_RESOURCE_NAME) {
   process.exit(1);
 }
 const azure = createAzure({ resourceName: process.env.AZURE_RESOURCE_NAME, apiKey: process.env.AZURE_API_KEY });
-const ledger = new BudgetLedger(new URL('../../../.m0-usage.json', import.meta.url).pathname, Number(process.env.M0_BUDGET_USD ?? 5));
+const ledger = new BudgetLedger(fileURLToPath(new URL('../../../.m0-usage.json', import.meta.url)), Number(process.env.M0_BUDGET_USD ?? 5));
 const systemChars = 200; // the system prompt plus schema overhead, rounded up
 const worst = ledger.assertAffordable(MODEL, SYNTHETIC_MESSAGE.length + systemChars + 2000, MAX_OUTPUT_TOKENS);
 console.log(`budget ok: spent $${ledger.spent().toFixed(6)}, worst case for this call $${worst.toFixed(6)}`);

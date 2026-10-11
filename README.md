@@ -18,6 +18,11 @@ exactly as it is at the end of that episode, and `git diff ep01-...ep02-...` sho
 
 Branch names are `epNN-short-topic`. A branch is added only when the episode's code and tests pass.
 
+Every episode branch carries two files at its root:
+
+- `RUNBOOK.md`: every command to run that branch, what each one does, what you should see, and how to fix common problems.
+- `CHANGELOG.md`: what that branch added and changed compared with the previous one, what was verified, and the known gaps.
+
 ## Commit convention
 
 - Messages start with an imperative summary of the change, for example `Add tool executor that carries the request principal`.
@@ -27,4 +32,4 @@ Branch names are `epNN-short-topic`. A branch is added only when the episode's c
 
 ## Run it
 
-Setup steps are in the README on each episode branch (start with `ep00-start`).
+Check out a branch and follow its `RUNBOOK.md`. Start with `ep00-start`.

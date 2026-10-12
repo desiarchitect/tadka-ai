@@ -33,7 +33,7 @@ describe('reservations', () => {
     const path = fresh();
     const { id } = await inChild(path, 'send-then-crash', '0.4');
     const ledger = new BudgetLedger(path, 1);
-    const reserved = ledger.reserve('gpt-5.4-mini', 0.1, 'other'); // never sent
+    const reserved = ledger.reserve('azure:gpt-5.4-mini', 0.1, 'other'); // never sent
     const { released, ambiguous } = ledger.reconcile();
     expect(released).toBe(1);
     expect(ambiguous.map((r) => r.id)).toEqual([id]);
@@ -45,12 +45,12 @@ describe('reservations', () => {
   it('manual settlement applies once: a repeat, an unknown id and a concurrent double settle are refused', async () => {
     const path = fresh();
     const ledger = new BudgetLedger(path, 1);
-    const a = ledger.reserve('gpt-5.4-mini', 0.2, 't')!;
+    const a = ledger.reserve('azure:gpt-5.4-mini', 0.2, 't')!;
     ledger.markSent(a);
     expect(ledger.settle(a, { inputTokens: 1000, outputTokens: 100 }, 'operator')).toBeCloseTo(0.0012);
     expect(() => ledger.settle(a, 'estimate', 'operator')).toThrow(/settled, not sent/);
     expect(() => ledger.settle('nope', 'estimate', 'operator')).toThrow(/unknown/);
-    const b = ledger.reserve('gpt-5.4-mini', 0.2, 't')!;
+    const b = ledger.reserve('azure:gpt-5.4-mini', 0.2, 't')!;
     ledger.markSent(b);
     const both = await Promise.all([inChild(path, 'settle', b), inChild(path, 'settle', b)]);
     expect(both.filter((r) => r.ok).length).toBe(1);
@@ -59,16 +59,16 @@ describe('reservations', () => {
 
   it('a released reservation cannot be settled, and an unpriced model cannot reserve', () => {
     const ledger = new BudgetLedger(fresh(), 1);
-    const id = ledger.reserve('gpt-5.4-mini', 0.1, 't')!;
+    const id = ledger.reserve('azure:gpt-5.4-mini', 0.1, 't')!;
     ledger.release(id);
     expect(() => ledger.settle(id, 'estimate', 'usage')).toThrow();
-    expect(() => ledger.reserve('some-other-model', 0.1, 't')).toThrow(/no price/);
+    expect(() => ledger.reserve('azure:some-other-model', 0.1, 't')).toThrow(/no price/);
   });
 
   it('a half-written temp file from a crash does not affect the ledger', () => {
     const path = fresh();
     const ledger = new BudgetLedger(path, 1);
-    ledger.record('gpt-5.4-mini', 1000, 100);
+    ledger.record('azure:gpt-5.4-mini', 1000, 100);
     writeFileSync(`${path}.tmp-99999`, '{"budgetUsd": 1, "calls": [');
     expect(new BudgetLedger(path, 1).spent()).toBeCloseTo(0.0012);
   });

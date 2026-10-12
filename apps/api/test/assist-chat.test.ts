@@ -18,9 +18,9 @@ const model = scripted([]);
 const use = (steps: Step[]) => { const inner = scripted(steps); model.doGenerate = (opts) => inner.doGenerate(opts); };
 const audit = memoryAudit();
 const assistant = {
-  model, audit,
+  model, providerOptions: {}, audit,
   ledger: new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'chat-')), 'usage.json'), 5),
-  config: { ...DEFAULT_LOOP, pricedModel: 'gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25 },
+  config: { ...DEFAULT_LOOP, priceKey: 'azure:gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25 },
 };
 
 let stack: Awaited<ReturnType<typeof startStack>>;
@@ -69,7 +69,7 @@ describe('POST /assist/chat', () => {
   });
 });
 
-describe('POST /assist/chat without AZURE_* settings', () => {
+describe('POST /assist/chat without a configured provider', () => {
   it('is 503 assistant_not_configured', async () => {
     const plain = await startStack();
     const token = (await plain.login('rahul@tadka.test')).accessToken;

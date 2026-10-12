@@ -42,7 +42,7 @@ function services(opts: { delay?: (orderId: string) => number; onCall?: () => ()
   return { orders, restaurants, calls };
 }
 
-const config = (over: Partial<LoopConfig> = {}): LoopConfig => ({ ...DEFAULT_LOOP, pricedModel: 'gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25, ...over });
+const config = (over: Partial<LoopConfig> = {}): LoopConfig => ({ ...DEFAULT_LOOP, priceKey: 'azure:gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25, ...over });
 const ledgerPath = () => join(mkdtempSync(join(tmpdir(), 'loop-')), 'usage.json');
 function setup(steps: Step[], over: { config?: Partial<LoopConfig>; svc?: ReturnType<typeof services>; ledger?: BudgetLedger } = {}) {
   const svc = over.svc ?? services();
@@ -52,7 +52,7 @@ function setup(steps: Step[], over: { config?: Partial<LoopConfig>; svc?: Return
   const model = scripted(steps);
   const executor: ExecutorDeps = { orders: svc.orders as never, restaurants: svc.restaurants as never, audit, log: (l) => toolLogs.push(l) };
   const ledger = over.ledger ?? new BudgetLedger(ledgerPath(), 5);
-  const deps: LoopDeps = { model, executor, ledger, config: config(over.config), log: (e) => events.push(e) };
+  const deps: LoopDeps = { model, providerOptions: {}, executor, ledger, config: config(over.config), log: (e) => events.push(e) };
   return { deps, model, svc, audit, toolLogs, events, ledger, run: (text = 'where is my order?') => runTurn(deps, rahul, text) };
 }
 const toolMessage = (model: MockLanguageModelV4, call: number) => {
@@ -238,11 +238,11 @@ describe('budget gate (section 3b)', () => {
     expect(r.stopReason).toBe('budget');
     expect(t.events).toHaveLength(1);
     expect(t.events[0]).toMatchObject({ event: 'estimator_violation', inputTokens: 9_000_000 });
-    expect(t.ledger.spent()).toBeCloseTo(BudgetLedger.cost('gpt-5.4-mini', 9_000_000, 20));
+    expect(t.ledger.spent()).toBeCloseTo(BudgetLedger.cost('azure:gpt-5.4-mini', 9_000_000, 20));
   });
 
   it('an unpriced model sends nothing', async () => {
-    const t = setup([{ calls: [present('r1')] }], { config: { pricedModel: 'mystery-model' } });
+    const t = setup([{ calls: [present('r1')] }], { config: { priceKey: 'azure:mystery-model' } });
     expect((await t.run()).stopReason).toBe('budget');
     expect(t.model.doGenerateCalls.length).toBe(0);
   });

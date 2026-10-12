@@ -64,11 +64,11 @@ pnpm typecheck
 
 ```bash
 pnpm eval:intent              # dry run: rules vs a stand-in model on 40 frozen messages, no key, no cost
-pnpm eval:intent -- --live    # the same set against your Foundry deployment, under a spending cap
+pnpm eval:intent -- --live    # the same set against the model LLM_PROVIDER names, under a spending cap
 ```
 
 Routes: `GET /assist/order-status?orderId=...` answers with no LLM. `POST /assist/intent` takes `{ "text": "..." }`, returns one of five labels
-and a next step chosen by application code. It uses the keyword rules unless `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` are set. Nothing cancels or refunds anything.
+and a next step chosen by application code. It uses the keyword rules unless a model provider is configured (`LLM_PROVIDER` and its credentials, RUNBOOK section 11). Nothing cancels or refunds anything.
 
 ## Episode 2: ask with tools
 
@@ -78,18 +78,19 @@ pnpm --filter @tadka/api exec vitest run test/naive-tool-demo.test.ts   # the na
 
 `POST /assist/chat` takes `{ "text": "..." }` from a logged-in customer and returns `{ answer, stopReason, steps }`. The model can call
 `get_my_orders`, `get_order` and `get_restaurant_menu`; identity always comes from the token. Each question is limited to 6 model requests,
-8 tool calls, 20 seconds, 32 KB per request and `ASSIST_TURN_BUDGET_USD`. It needs `AZURE_RESOURCE_NAME` and `AZURE_API_KEY`; without them
+8 tool calls, 20 seconds, 32 KB per request and `ASSIST_TURN_BUDGET_USD`. It needs a configured model provider (`LLM_PROVIDER` and its credentials); without one
 it returns 503. See RUNBOOK section 7.
 
 ## The LLM probe
 
 ```bash
 pnpm probe:llm             # dry run with a fake model: no key, no network, no cost
-pnpm probe:llm -- --live   # ONE real call to gpt-5.4-mini on Microsoft Foundry
+pnpm probe:llm -- --live   # ONE real call to gpt-5.4-mini on the provider LLM_PROVIDER names
 ```
 
-The live call needs `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`, and a Foundry deployment
-of gpt-5.4-mini named `gpt-5.4-mini` (or set `AZURE_DEPLOYMENT`). It sends one synthetic message,
+The model comes from `apps/api/src/llm`: `LLM_PROVIDER=azure` (Microsoft Foundry) or `LLM_PROVIDER=openai` (direct API); see RUNBOOK section 11.
+For Foundry the live call needs `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`, and a deployment
+of gpt-5.4-mini named like the model (`gpt-5.4-mini`, or set `AZURE_DEPLOYMENT`). It sends one synthetic message,
 caps output at 400 tokens, turns reasoning off (`reasoningEffort: 'none'`), sets `maxRetries: 0`,
 and asks the Responses API not to store the response (`store: false`).
 Before sending, it checks a local ledger (`.m0-usage.json`) and refuses if the worst-case cost

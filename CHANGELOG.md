@@ -18,11 +18,12 @@ Episode 2: typed tool calling with server-side identity. Starts from `ep01-struc
 - Every tool call gets exactly one result, tied to its call id, even when parallel calls finish out of order.
 - Spending guard per model request: a conservative cost estimate (input bytes counted as tokens plus overheads, times `ASSIST_ESTIMATE_MARGIN`; the full output cap, which is also sent on every request; priced separately), checked against `ASSIST_TURN_BUDGET_USD` and then reserved in the shared ledger. Actual usage is charged after; missing usage is charged at the estimate; usage above the estimate is charged in full, logged as `estimator_violation`, and stops the turn. An unpriced model sends nothing.
 - Ledger reservations (`reserved`, `sent`, `settled`, `released`) with a lock file and durable writes, so concurrent processes on one machine cannot spend the same allowance. On start, never-sent reservations are released and sent-but-unsettled ones stay held. `pnpm budget:reservations` and `pnpm budget:settle` let an operator settle them once each.
-- `POST /assist/chat`: customers only, body `{ "text" }`, single turn, returns `{ answer, stopReason, steps }`. Without `AZURE_*` settings it returns 503 `assistant_not_configured`.
+- `POST /assist/chat`: customers only, body `{ "text" }`, single turn, returns `{ answer, stopReason, steps }`. Without a configured model provider it returns 503 `assistant_not_configured`.
 - `OrdersService.listRecent` (newest first, then by id) and `RestaurantsService.menuPage` (by name, then id, with the total).
 - Restricted audit log `logs/security-audit.jsonl`: the only place that records a request for another customer's order (principal id and an HMAC of the order id, no order data). Ordinary logs show `not_found` for that case exactly as for an invented id.
-- Settings: `ASSIST_PRICED_AS`, `ASSIST_MAX_OUTPUT_TOKENS`, `ASSIST_TURN_BUDGET_USD`, `ASSIST_ESTIMATE_MARGIN`, `AUDIT_HMAC_KEY`.
-- Tests: 140 (132 API, 8 fake provider), 58 of them new.
+- Settings: `ASSIST_MAX_OUTPUT_TOKENS`, `ASSIST_TURN_BUDGET_USD`, `ASSIST_ESTIMATE_MARGIN`, `AUDIT_HMAC_KEY`.
+- The assistant takes its model, request options and price key from the `ModelHandle` in `src/llm` (merged from ep01). `ASSIST_PRICED_AS` is gone: the price key is `provider:model`, and a pair with no price row sends nothing.
+- Tests: 168 (160 API, 8 fake provider) after the provider boundary was merged in.
 - `RUNBOOK.md` section 7 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
@@ -53,19 +54,23 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - `src/assist/classifier.ts`: the LLM classifier (`generateText` with `Output.object`, reasoning off, `maxRetries: 0`, 100-token cap). Every call ends in one outcome: `ok`, `refusal`, `invalid_output` or `provider_error`. A failure is never counted as the valid label `other`.
 - `src/assist/next-step.ts`: the application decides what happens after a label. `order_status` lists the caller's own active orders (one, several or none; it never guesses between several); cancel, refund and menu are unsupported in this episode; `other` asks for clarification. No label changes an order. A failing order lookup is a safe 500, not "no orders".
 - `OrdersService.listActive`: the caller's orders that are not Delivered or Cancelled.
-- `POST /assist/intent` uses the Foundry model when `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` are set, behind the spending ledger; otherwise it uses the keyword rules. The response says which one answered.
+- `POST /assist/intent` uses the model from `src/llm` (Foundry or the direct OpenAI API, chosen by `LLM_PROVIDER`) when one is configured, behind the spending ledger; otherwise it uses the keyword rules. The response says which one answered.
 - Evaluation: `pnpm eval:intent` over 40 frozen synthetic messages (19 Hinglish, 5 hard cases). A separate 8-message dev set is used for tuning. Failures count as wrong and are reported apart from a valid `other`. The dry run uses a stand-in model and checks the harness only; `--live` measures the real deployment and writes per-message results (outcome, tokens, cost, latency) to `.eval-runs/`.
 - Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed. The worst case estimates input tokens as the UTF-8 byte length of the prompt (a conservative estimate that does not undercount Devanagari, not a guaranteed bound), adds a fixed overhead and the full output cap, prices input and output separately, and refuses a model with no configured price.
 - `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
-- Tests: 82 (74 API, 8 fake provider), 41 of them new.
+- Tests: 110 (102 API, 8 fake provider), 41 of them new.
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
 - CI runs on Node 24 (required) and Node 26 (an extra check that may fail without failing the workflow), and installs pnpm with npm because Node 25 and later have no corepack.
+- The classifier, the evaluator, the spending guard and `pnpm eval:intent` take their model, request options and price from the `ModelHandle` of the model boundary introduced on `ep00-start`; none of them names a provider. `.eval-runs` files record the model and the price row used.
 - The runbook is now for this branch; sections after the walkthrough moved down by one number.
 
+### Fixed
+- The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
+
 ### Verified
-- Typecheck and 82 of 82 tests on Node 24 and Node 26.
+- Typecheck and 110 of 110 tests on Node 24 and Node 26.
 - On a local run: both new routes in bash and PowerShell, the dry-run evaluation (rules 24 of 40, hard cases 0 of 5).
 
 ### Not in this branch
@@ -85,17 +90,24 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - Payments: charge only, through a `PaymentProvider` interface. One stable provider key per order, so a retry can never charge twice. A timed-out charge is resolved by looking it up under the same key.
 - Fake payment provider (`apps/fake-psp`): charges, refunds, lookup by idempotency key, and a control endpoint to make it succeed, decline, time out or fail. State is in memory.
 - Tracing: OpenTelemetry across both processes, exported to Jaeger. A paid order is one trace of 15 spans over two services.
-- LLM probe (`pnpm probe:llm`): one structured call (`generateText` with `Output.object`) through the AI SDK to `gpt-5.4-mini` on Microsoft Foundry, with a dry-run mode that uses a fake model. Reasoning off, output capped at 400 tokens, no retries, `store: false`.
+- LLM probe (`pnpm probe:llm`): one structured call (`generateText` with `Output.object`) through the AI SDK to `gpt-5.4-mini`, with a dry-run mode that uses a fake model. Reasoning off, output capped at 400 tokens, no retries, `store: false`.
+- A model boundary in `apps/api/src/llm`: a factory plus one adapter per provider (Microsoft Foundry through `@ai-sdk/azure`, the direct OpenAI API through `@ai-sdk/openai`). Application code and scripts receive a `ModelHandle`: the AI SDK model, the request options the adapter chose (opaque), structured non-secret metadata and a price key. Only `src/llm` imports a vendor package, builds a client or builds provider option objects, so changing provider is configuration (`LLM_PROVIDER=azure|openai`). With `LLM_PROVIDER` unset, Azure-only settings still work with a warning; a machine with both providers configured must choose.
+- The model we price (`LLM_MODEL`) is kept apart from the Azure deployment name (`AZURE_DEPLOYMENT`). The AI SDK decides what a model supports from the name it is given, and on Azure that is the deployment's, so a deployment not named like a GPT model is refused instead of silently losing the reasoning setting.
+- Prices per provider and model (`src/llm/pricing.ts`), each with tier, source and check date. A pair with no price, such as `openai:gpt-5.4-mini` for now, is refused before anything is sent. Reasoning tokens are part of the reported output total and are charged once.
 - Spending guard: a local ledger that refuses a live call before sending it if the worst-case cost would pass `M0_BUDGET_USD` (default 5).
 - CI workflow for GitHub Actions: Node 24, frozen lockfile, typecheck and tests against a Postgres service.
 - `RUNBOOK.md` (how to run this branch, command by command, with install steps for Windows, macOS and Linux) and this changelog.
 - Windows support: file paths built with `fileURLToPath`, and `.gitattributes` keeps LF line endings.
 - PowerShell versions of the install check, Quick start, walkthrough, port cleanup and teardown, so Windows users can use PowerShell or Git Bash.
-- Tests: 41 (33 API, 8 fake provider).
+- Tests: 69 (61 API, 8 fake provider). They include an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), the provider selection rules, and a boundary test.
+
+### Fixed
+- The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
 
 ### Verified
-- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 41 of 41 tests.
-- The dry-run probe, and the refusal to run `--live` without credentials.
+- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 69 of 69 tests.
+- The dry-run probe, and the refusals of `--live`: no credentials, an unrecognised Azure deployment name, and `LLM_PROVIDER=openai` before a price row exists.
+- The adapters through the real AI SDK providers against a stand-in for the network. A live call on either provider has not been run from this repository yet.
 
 ### Not in this branch
 - Chat, tools, RAG, the agent loop and refunds. They arrive in later episode branches.

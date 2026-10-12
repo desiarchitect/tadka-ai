@@ -1,14 +1,14 @@
 // The two ways the app can classify a message. Both return the same shape, so the route
 // does not care which one it has.
-import type { LanguageModel } from 'ai';
 import { fileURLToPath } from 'node:url';
-import { BudgetLedger, type PricedModel } from './budget.js';
+import type { ModelHandle } from '../llm/types.js';
+import type { BudgetLedger } from './budget.js';
 import { classifyIntent, MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, type ClassifyResult } from './classifier.js';
 import { classifyWithRules } from './intent.js';
 
 export type IntentClassifier = (text: string) => Promise<ClassifyResult & { classifier: 'llm' | 'rules' }>;
 
-// No model, no key, no cost. The default when no Azure settings are present.
+// No model, no key, no cost. The default when no model provider is configured.
 export const rulesClassifier: IntentClassifier = async (text) => ({
   classifier: 'rules',
   outcome: 'ok',
@@ -28,15 +28,15 @@ export function worstCaseInputTokens(text: string): number {
 
 // The LLM classifier behind the budget ledger. The ledger refuses BEFORE the request is sent
 // if actual spend so far plus the worst case for this request could cross the cap.
-export function llmClassifier(model: LanguageModel, ledger: BudgetLedger, priced: PricedModel): IntentClassifier {
+export function llmClassifier(handle: ModelHandle, ledger: BudgetLedger): IntentClassifier {
   return async (text) => {
     try {
-      ledger.assertAffordable(priced, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
+      ledger.assertAffordable(handle.priceKey, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
     } catch {
       return { classifier: 'llm', outcome: 'provider_error', reason: 'budget' };
     }
-    const r = await classifyIntent(model, text);
-    if (r.usage) ledger.record(priced, r.usage.inputTokens, r.usage.outputTokens);
+    const r = await classifyIntent(handle, text);
+    if (r.usage) ledger.record(handle.priceKey, r.usage.inputTokens, r.usage.outputTokens);
     return { classifier: 'llm', ...r };
   };
 }

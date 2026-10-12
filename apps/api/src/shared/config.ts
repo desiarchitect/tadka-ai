@@ -19,9 +19,12 @@ const env = z.object({
 });
 
 export type Config = z.infer<typeof env>;
+// A setting that is present but empty (`PORT=` in .env) counts as not set, so it takes its default.
+// An empty value is never turned into 0 or an empty URL. A value that is set but wrong is still refused.
 export const loadConfig = (source: Record<string, string | undefined> = process.env): Config => {
-  const r = env.safeParse(source);
+  const present = Object.fromEntries(Object.entries(source).filter(([, v]) => v !== undefined && v !== ''));
+  const r = env.safeParse(present);
   if (r.success) return r.data;
-  const bad = r.error.issues.map((i) => i.path.join('.') || 'config');
-  throw new Error(bad.includes('DEMO_MODE') ? 'DEMO_MODE must be "1" or "0" (or empty). Refusing to start.' : `Invalid configuration: ${bad.join(', ')}`);
+  const bad = [...new Set(r.error.issues.map((i) => i.path.join('.') || 'config'))];
+  throw new Error(bad.includes('DEMO_MODE') ? 'DEMO_MODE must be "1" or "0" (or empty).' : `invalid setting${bad.length > 1 ? 's' : ''}: ${bad.join(', ')} (see .env.example for the allowed values).`);
 };

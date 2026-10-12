@@ -2,7 +2,23 @@ import type { z } from 'zod';
 import { ErrorBodySchema, LoginResponseSchema, TriageResponseSchema } from './schema.js';
 import type { ApiDiagnostics, LoginResponse, TriageResponse } from './types.js';
 
-export const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:3000';
+// Where the API is. VITE_API_URL is compiled into the bundle, so it must be set when a production build is made.
+// The localhost default exists only for local development (`vite`, the tests): a production build that was made
+// without VITE_API_URL has no address at all, rather than quietly pointing every visitor at their own localhost.
+// The default is a separate constant on purpose: `import.meta.env.DEV` is replaced by `false` when a production
+// bundle is made, so the bundler removes the localhost string from it entirely (scripts/check-bundle.mjs checks).
+const DEV_DEFAULT = import.meta.env.DEV ? 'http://localhost:3000' : null;
+
+export function resolveApiBaseUrl(
+  env: { VITE_API_URL?: string; DEV?: boolean } = { VITE_API_URL: import.meta.env.VITE_API_URL, DEV: import.meta.env.DEV },
+  devDefault: string | null = DEV_DEFAULT,
+): string | null {
+  const configured = env.VITE_API_URL?.trim();
+  if (configured) return configured;
+  return env.DEV ? devDefault : null;
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 // Longer than the server's own provider timeout (15 s), so the server's answer arrives first and the
 // client timeout only fires when the server itself is unreachable or stuck.
@@ -49,7 +65,7 @@ export class ApiClient {
   private baseUrl: string;
   private timeoutMs: number;
 
-  constructor(baseUrl: string = API_BASE_URL, timeoutMs: number = API_TIMEOUT_MS) {
+  constructor(baseUrl: string = API_BASE_URL ?? '', timeoutMs: number = API_TIMEOUT_MS) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.timeoutMs = timeoutMs;
   }
@@ -81,6 +97,13 @@ export class ApiClient {
     if (call.signal?.aborted) controller.abort();
     else call.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
+    if (!this.baseUrl) {
+      const diagnostics: ApiDiagnostics = {
+        httpStatus: 0, statusText: 'Not configured', outcome: 'error', traceId: null, requestId: null, durationMs: 0, authenticated: false,
+        errorCode: 'api_url_not_configured', errorMessage: 'This build has no API address (VITE_API_URL was not set when it was built).', timestamp: new Date().toISOString(),
+      };
+      throw Object.assign(new Error(diagnostics.errorMessage), { diagnostics });
+    }
     const base = (): Pick<ApiDiagnostics, 'durationMs' | 'timestamp'> => ({ durationMs: Math.round(performance.now() - started), timestamp: new Date().toISOString() });
     const fail = (d: Omit<ApiDiagnostics, 'outcome' | 'durationMs' | 'timestamp'>): never => {
       const diagnostics: ApiDiagnostics = { ...d, outcome: 'error', ...base() };

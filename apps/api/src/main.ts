@@ -1,44 +1,49 @@
-import { LlmConfigError, createModelHandle, formatMeta, type ModelPort } from './llm/index.js';
-import { demoModel } from './assist/demo-model.js';
+import { LlmConfigError, formatMeta, type ModelPort } from './llm/index.js';
 import { buildApp } from './app.js';
 import { BudgetLedger } from './assist/budget.js';
 import { defaultLedgerPath, llmClassifier } from './assist/classifiers.js';
+import { selectProviderMode } from './assist/provider-mode.js';
 import { loadSigningKeys } from './identity/access-tokens.js';
 import { HttpPaymentProvider } from './payments/provider.js';
-import { loadConfig } from './shared/config.js';
+import { loadConfig, type Config } from './shared/config.js';
 import { createDb } from './shared/db.js';
 import { createShutdown, installSignalHandlers, telemetryStage } from './shutdown.js';
 
-const config = loadConfig();
-if (!config.JWT_PRIVATE_JWK) console.warn('JWT_PRIVATE_JWK unset: using a fresh dev signing key; tokens end when the process restarts.');
-const { db, pool } = createDb(config.DATABASE_URL);
+// A configuration mistake is a message and exit code 1, never a stack trace.
+const refuse = (message: string): never => { console.error(`Startup refused: ${message}`); process.exit(1); };
 
-let modelSetup: ReturnType<typeof createModelHandle>;
+let config: Config;
+try { config = loadConfig(); } catch (e) { config = refuse((e as Error).message); }
+if (!config.JWT_PRIVATE_JWK) console.warn('JWT_PRIVATE_JWK unset: using a fresh dev signing key; tokens end when the process restarts.');
+
+// One decision for both assist routes (see src/assist/provider-mode.ts): demo never reads provider settings.
+let mode: ReturnType<typeof selectProviderMode>;
 try {
-  modelSetup = createModelHandle();
+  mode = selectProviderMode({ demo: config.DEMO_MODE });
 } catch (e) {
   if (!(e instanceof LlmConfigError)) throw e;
-  console.error(`${e.message}. Fix the LLM settings in .env, or clear them to use the keyword rules.`);
-  process.exit(1);
+  mode = refuse(`${e.message}. Fill in the missing value in .env, or leave LLM_PROVIDER empty (the keyword rules then answer /assist/intent; set DEMO_MODE=1 for simulated triage answers).`);
 }
 
 let model: ModelPort | undefined;
-if (config.DEMO_MODE) {
-  // Explicit opt-in. Every triage response is marked simulated; a real provider setting is ignored.
-  console.warn('DEMO_MODE=1: /assist/triage returns SIMULATED answers (modelId demo-mock). No real model is called.');
-  model = demoModel();
-} else if (modelSetup.status === 'ready') {
-  for (const w of modelSetup.warnings) console.warn(`warning: ${w}`);
-  console.log(`llm: ${formatMeta(modelSetup.handle.meta)}`);
-  model = modelSetup.handle;
+if (mode.mode === 'demo') {
+  console.warn('DEMO_MODE=1: /assist/triage returns SIMULATED answers (modelId demo-mock). No real model is called and provider settings are not read.');
+  model = mode.model;
+} else if (mode.mode === 'live') {
+  for (const w of mode.warnings) console.warn(`llm: ${w}`);
+  console.log(`llm: ${formatMeta(mode.handle.meta)}`);
+  model = mode.handle;
 } else {
-  console.warn(`llm is off: ${modelSetup.reason}. /assist/triage answers 503 provider_not_configured (set DEMO_MODE=1 for simulated answers).`);
+  console.warn(`llm is off: ${mode.reason}. /assist/triage answers 503 provider_not_configured (set DEMO_MODE=1 for simulated answers).`);
 }
 
-const classify = modelSetup.status === 'ready'
-  ? llmClassifier(modelSetup.handle, new BudgetLedger(defaultLedgerPath(), config.M0_BUDGET_USD))
+// The LLM classifier exists only in live mode, behind the spending ledger. Demo and off use the keyword rules.
+const classify = mode.mode === 'live'
+  ? llmClassifier(mode.handle, new BudgetLedger(defaultLedgerPath(), config.M0_BUDGET_USD))
   : undefined;
-console.log(`POST /assist/intent classifier: ${modelSetup.status === 'ready' ? `LLM (${formatMeta(modelSetup.handle.meta)})` : `keyword rules: ${modelSetup.reason}`}`);
+console.log(`POST /assist/intent classifier: ${mode.mode === 'live' ? `LLM (${formatMeta(mode.handle.meta)})` : mode.mode === 'demo' ? 'keyword rules (DEMO_MODE=1: no provider is used)' : `keyword rules: ${mode.reason}`}`);
+
+const { db, pool } = createDb(config.DATABASE_URL);
 
 const app = buildApp({
   db,

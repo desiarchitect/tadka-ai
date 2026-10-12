@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiClient, isCancelled } from '../src/api/client.js';
+import { ApiClient, isCancelled, resolveApiBaseUrl } from '../src/api/client.js';
 import type { ApiDiagnostics } from '../src/api/types.js';
 
 const res = (status: number, body: unknown, ok = status >= 200 && status < 300) => ({
@@ -98,5 +98,28 @@ describe('ApiClient', () => {
     expect(((f.mock.calls[0]![1] as RequestInit).headers as Record<string, string>)['Authorization']).toBeUndefined();
     expect(((f.mock.calls[1]![1] as RequestInit).headers as Record<string, string>)['Authorization']).toBe('Bearer tok');
     expect(f.mock.calls[0]![0]).toBe('http://x/assist/triage');
+  });
+});
+
+describe('which API address a build uses', () => {
+  it('uses VITE_API_URL when it is set, in development and in production', () => {
+    expect(resolveApiBaseUrl({ VITE_API_URL: 'https://api.example.com', DEV: false })).toBe('https://api.example.com');
+    expect(resolveApiBaseUrl({ VITE_API_URL: ' https://api.example.com ', DEV: true })).toBe('https://api.example.com');
+  });
+  it('development (the dev server, the tests) falls back to localhost:3000', () => {
+    expect(resolveApiBaseUrl({ DEV: true })).toBe('http://localhost:3000');
+    expect(resolveApiBaseUrl({ VITE_API_URL: '', DEV: true })).toBe('http://localhost:3000');
+  });
+  it('a production build without VITE_API_URL has NO address, not localhost', () => {
+    expect(resolveApiBaseUrl({ DEV: false })).toBeNull();
+    expect(resolveApiBaseUrl({ VITE_API_URL: '   ', DEV: false })).toBeNull();
+  });
+  it('a client with no address sends nothing and says why', async () => {
+    const f = vi.fn();
+    globalThis.fetch = f;
+    const err = await failure(new ApiClient('').triage('hi', 'tok'));
+    expect(err?.diagnostics.errorCode).toBe('api_url_not_configured');
+    expect(err?.message).toMatch(/VITE_API_URL/);
+    expect(f).not.toHaveBeenCalled();
   });
 });

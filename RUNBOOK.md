@@ -145,7 +145,7 @@ pnpm dev
 ```
 
 > **Before you open the browser page:** `.env` copies as `DEMO_MODE=0`, so the assistant has no model yet and answers
-> `503 provider_not_configured`. Pick one: add provider credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart `pnpm dev`
+> `503 provider_not_configured`. Pick one: add provider credentials (section 10), or set `DEMO_MODE=1` in `.env` and restart `pnpm dev`
 > for clearly labelled SIMULATED answers. Section 5 ("Recording a demo") says which to choose.
 
 ## 4. The commands, one by one
@@ -182,7 +182,7 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
 | `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
-| `LLM_PROVIDER` | `azure` | Only for `--live` | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). See section 10 |
+| `LLM_PROVIDER` | empty | Only when you have credentials | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). **Leave it empty until you have credentials**: choosing a provider without its credentials stops the API at startup. See "What starts, and what refuses to start" below and section 10 |
 | `LLM_MODEL` | `gpt-5.4-mini` | No | The model the budget prices and the evaluations record. Not the Azure deployment name |
 | `AZURE_RESOURCE_NAME` | empty | With `LLM_PROVIDER=azure` | The name of your Azure resource. See section 10 |
 | `AZURE_API_KEY` | empty | With `LLM_PROVIDER=azure` | KEY 1 of that resource. See section 10 |
@@ -196,13 +196,25 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `CORS_ORIGIN` | empty | No | One browser origin allowed to call the API. Empty = `http://localhost:5173` and `:4173` |
 | `SHUTDOWN_DEADLINE_MS` | `8000` | No (ops/test knob) | Overall time `Ctrl+C` / SIGTERM may take before the process is forced to exit |
 
-Everything except the provider credentials already works as copied. You can run the whole branch, including all tests and
-the dry-run probe, without filling anything in.
+The template as copied starts the whole branch: the API, the fake provider and the page, and all tests and the dry-run probe run.
+Without a provider the assistant is simply off (see the next paragraphs); nothing else needs filling in.
 
-**The browser assistant needs one of two things.** Either provider credentials (section 9), or `DEMO_MODE=1` in `.env`.
+**The browser assistant needs one of two things.** Either provider credentials (section 10), or `DEMO_MODE=1` in `.env`.
 With neither, `POST /assist/triage` answers `503 provider_not_configured`: the server never pretends to be a model.
 With `DEMO_MODE=1` every answer is marked `simulated: true`, carries `modelId: "demo-mock"`, and the page shows a SIMULATED badge.
-If you add real credentials, set `DEMO_MODE=0` (a real provider setting is ignored while demo mode is on).
+If you add real credentials, set `DEMO_MODE=0` (provider settings are not read at all while demo mode is on).
+
+**What starts, and what refuses to start.** The API decides once, at startup, from `DEMO_MODE` and `LLM_PROVIDER`:
+
+| `DEMO_MODE` | `LLM_PROVIDER` and credentials | Result |
+|---|---|---|
+| `1` | anything, even half filled | **Starts.** Simulated answers. Provider settings are not read and no provider is ever contacted |
+| `0` or empty | empty (the template) and no `AZURE_*` / `OPENAI_*` | **Starts, model off.** Triage is `503 provider_not_configured` |
+| `0` or empty | `azure` or `openai` with its credentials complete | **Starts, live model.** The log names the deployment |
+| `0` or empty | `azure` or `openai` **without** its credentials, or an unknown value, or a deployment not named like a GPT model | **Refuses to start**, exit code 1, one line such as `Startup refused: LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY`. It never prints a credential value |
+| any other value than `1`, `0` or empty | | **Refuses to start** (`DEMO_MODE must be "1" or "0" (or empty)`) |
+
+A setting that is present but empty (`TRIAGE_RATE_LIMIT_PER_MIN=`) takes its default; a wrong value (`TRIAGE_TIMEOUT_MS=soon`) refuses to start and names the setting.
 
 Do not set `PORT` in `.env`: the API (3000) and the fake provider (4010) both read it and would collide.
 Never paste your key into a chat, an issue or a commit.
@@ -265,7 +277,7 @@ Open `http://localhost:5173` in any browser while `pnpm dev` is running:
 
 | You want to show | Settings in `.env` | What the viewer sees |
 |---|---|---|
-| **A real model answering** | Provider credentials (section 9) and `DEMO_MODE=0` | No SIMULATED badge. The Developer Panel shows the model name the provider reported. Run `pnpm probe:llm -- --live` once first to prove the credentials work (it makes one paid call, about a tenth of a cent) |
+| **A real model answering** | Provider credentials (section 10) and `DEMO_MODE=0` | No SIMULATED badge. The Developer Panel shows the model name the provider reported. Run `pnpm probe:llm -- --live` once first to prove the credentials work (it makes one paid call, about a tenth of a cent) |
 | **The whole flow with no cloud account** | `DEMO_MODE=1` (credentials not needed) | A yellow **SIMULATED** badge on every answer and `demo-mock` as the model in the Developer Panel. The answer does not depend on the message. Say so on camera |
 | Neither | `DEMO_MODE=0`, no credentials | An error card: "No AI model is configured on the server" (`503 provider_not_configured`) |
 
@@ -276,8 +288,10 @@ Steps for a simulated recording:
 3. Submit a message. Check for the SIMULATED badge and `demo-mock` before you start recording.
 
 Notes: while `DEMO_MODE=1` a real provider setting is ignored, so set it back to `0` (or empty) when you want the real model.
-`pnpm dev` also runs the web page with its demo sign-in on. A production build of the page (`pnpm build`) has the demo sign-in off and cannot be used to
-record; for a recorded build of the page use `VITE_DEMO_LOGIN=1 pnpm --filter @tadka/web build`.
+`pnpm dev` also runs the web page with its demo sign-in on, and with the API at `http://localhost:3000`. A production build of the page (`pnpm build`)
+has the demo sign-in off and cannot be used to record. For a recorded build of the page, set both settings when you build, because they are compiled into the page:
+`VITE_DEMO_LOGIN=1 VITE_API_URL=http://localhost:3000 pnpm --filter @tadka/web build`, then `pnpm --filter @tadka/web preview` (it serves on port 4173, which the API allows).
+`VITE_API_URL` is **required** for every production build: without it the page has no API address, shows what to set, and sends nothing (it never falls back to `localhost`).
 
 Run these in a second terminal. First, a helper that logs in and prints a token:
 
@@ -589,7 +603,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: fake-provider tests, API tests, and web client tests pass. Your dev database is never touched.
+Expected: 13 fake-provider tests, 154 API tests and 35 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -608,12 +622,14 @@ Expected: fake-provider tests, API tests, and web client tests pass. Your dev da
 | `intent-eval.test.ts` (10) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent, the input estimate counting UTF-8 bytes, an unpriced model refused |
 | `boundaries.test.ts` (4) | `assist` imports only the public orders service, and the model output has no field that can name a user |
 | `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
+| `guard.test.ts` (7) | The shared guard for model-spending routes on a bare app: 401/403 never use quota, the limit is per verified user, each route has its own quota, Retry-After, the timeout signal |
+| `provider-mode.test.ts` (5) | The startup decision: demo never initialises the provider, live, off, and a chosen-but-incomplete provider is refused |
 | `assist-errors.test.ts` (15) | Provider failures (401, 403, 429, 500, 404, network, 504, bad output) become our own status and code; provider text, keys, resource names and the customer's message never reach the response or the log; a provider auth failure is not a 401; a hung call is cut off at the timeout and the model sees the abort |
-| `assist-access.test.ts` (14) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
-| `startup.test.ts` (8) | The real server process: no provider and no demo mode is `503 provider_not_configured`; `DEMO_MODE=1` is `simulated: true`; a bad `DEMO_MODE` refuses to start |
+| `assist-access.test.ts` (15) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
+| `startup.test.ts` (19) | The real server process, started with the command from `package.json`: from the parsed `.env.example` as copied (model off, honest 503), with `DEMO_MODE=1`, with a half-filled provider in demo mode (still starts), and the live refusals (provider chosen without its key, unknown provider, bad deployment name, bad numeric setting): exit code 1, one line, no stack trace, no credential value |
 | `shutdown.test.ts` (20) | The shutdown sequence (order, a failing stage, a hang in each stage position, a stage finishing after the deadline, repeated signals, the root `--no-bail` setting) and the real process with telemetry off, on and refused, with a server close stuck on an unfinished request, and with a trace backend that never answers |
 | `fake-psp/test/shutdown.test.ts` (5) | The same shutdown contract for the fake provider |
-| `web/test/*.test.ts(x)` (30) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
+| `web/test/*.test.ts(x)` (35) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
 ## 10. The LLM probe
@@ -748,7 +764,7 @@ A good run prints JSON with `"mode": "live"`, your `model` and the price row it 
 
 | Message or symptom | Likely cause | Fix |
 |---|---|---|
-| `LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | A value is empty or `.env` is not in the repository root | Fill both, save, run again from the repository root |
+| `Startup refused: LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | You chose a provider but a credential is empty, or `.env` is not in the repository root | Fill both and run again from the repository root; or empty `LLM_PROVIDER` to run without a model (add `DEMO_MODE=1` for simulated answers) |
 | `AZURE_DEPLOYMENT "..." is not named like a GPT model` | The deployment has a name the AI SDK cannot recognise | Create or choose a deployment named like `gpt-5.4-mini` |
 | `Nothing was sent. budget: no price configured for ...` | This provider and model have no price row | Add one in `apps/api/src/llm/pricing.ts` (section 10, Switch provider) |
 | 401 (access denied) | Wrong or regenerated key | Copy KEY 1 again |
@@ -788,8 +804,9 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 7) |
 | No traces in Jaeger | Jaeger is not running, or `OTEL_EXPORTER_OTLP_ENDPOINT` is empty | Start with `--profile observability`; check `.env` |
 | PowerShell prints `ConvertFrom-Json : Cannot bind argument to parameter 'InputObject' because it is null` and `[0]` | The `Call` helper from an older copy of this runbook sent a body with GET requests, which Windows PowerShell 5.1 refuses | Paste the `Call` and `Login` helpers from section 5 again |
-| The browser says "No AI model is configured on the server" (`503 provider_not_configured`) | No provider credentials, and `DEMO_MODE` is off | Add credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart |
+| The browser says "No AI model is configured on the server" (`503 provider_not_configured`) | No provider credentials, and `DEMO_MODE` is off | Add credentials (section 10), or set `DEMO_MODE=1` in `.env` and restart |
 | The page says "Not signed in. The demo sign-in is switched off" | The client was built without `VITE_DEMO_LOGIN=1` (a production build) | Use `pnpm dev`, or build with `VITE_DEMO_LOGIN=1` |
+| The page says "This build has no API address" | A production build was made without `VITE_API_URL` | Rebuild with `VITE_API_URL` set to the API's address (for local use `http://localhost:3000`) |
 | `DEMO_MODE must be "1" or "0"` at start | `DEMO_MODE` has another value (`true`, `yes`) | Use `1`, `0` or leave it empty |
 | `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |

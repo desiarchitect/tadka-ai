@@ -8,8 +8,8 @@
   --border: #e7e5e4;
   --border-focus: #c2410c;
   --text-main: #1c1917;
-  --text-muted: #78716c;
-  --text-light: #a8a29e;
+  --text-muted: #67605b; /* >= 5.9:1 on every card background */
+  --text-light: #716a65; /* >= 4.8:1: the lightest text still meets WCAG AA */
   --status-success: #15803d;
   --status-success-bg: #dcfce7;
   --status-error: #b91c1c;
@@ -397,14 +397,30 @@ body {
 }
 
 .dev-toggle-header {
+  /* a native <button>: one control, one tab stop, Enter and Space work without any script */
+  width: 100%;
   padding: 16px 24px;
   background: #fafaf9;
+  border: 0;
   border-bottom: 1px solid transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   cursor: pointer;
   user-select: none;
+}
+
+.dev-toggle-header:focus-visible {
+  outline: 3px solid var(--border-focus);
+  outline-offset: -3px;
+}
+
+.dev-toggle-label {
+  flex: none;
 }
 
 .dev-toggle-header:hover {
@@ -433,11 +449,19 @@ body {
 
 .diag-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* min(220px, 100%): on a phone the column is the panel width, never wider than it */
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 
+/* A full row, however many columns there are. (It was an inline `span 2`, which forced a second column on a
+   phone and pushed the values 44 px past the edge of the panel.) */
+.diag-wide {
+  grid-column: 1 / -1;
+}
+
 .diag-item {
+  min-width: 0;
   background: #f5f5f4;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -460,6 +484,7 @@ body {
   font-size: 13px;
   color: var(--text-main);
   word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .diag-value.success {
@@ -484,6 +509,12 @@ body {
   padding: 10px 14px;
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--accent);
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 /* Spinner */

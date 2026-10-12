@@ -29,7 +29,7 @@ describe('CORS, trace headers, and assist triage route', () => {
       db,
       keys,
       provider: new HttpPaymentProvider('http://localhost:4010'),
-      model: fakeModel,
+      model: { model: fakeModel, providerOptions: {} },
       corsOrigins: ['http://localhost:5173'],
     });
 

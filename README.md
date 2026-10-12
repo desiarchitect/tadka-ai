@@ -64,11 +64,12 @@ pnpm typecheck
 
 ```bash
 pnpm probe:llm             # dry run with a fake model: no key, no network, no cost
-pnpm probe:llm -- --live   # ONE real call to gpt-5.4-mini on Microsoft Foundry
+pnpm probe:llm -- --live   # ONE real call to gpt-5.4-mini on the provider LLM_PROVIDER names
 ```
 
-The live call needs `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`, and a Foundry deployment
-of gpt-5.4-mini named `gpt-5.4-mini` (or set `AZURE_DEPLOYMENT`). It sends one synthetic message,
+The model comes from `apps/api/src/llm`: `LLM_PROVIDER=azure` (Microsoft Foundry) or `LLM_PROVIDER=openai` (direct API); see RUNBOOK section 9.
+For Foundry the live call needs `AZURE_RESOURCE_NAME` and `AZURE_API_KEY` in `.env`, and a deployment
+of gpt-5.4-mini named like the model (`gpt-5.4-mini`, or set `AZURE_DEPLOYMENT`). It sends one synthetic message,
 caps output at 400 tokens, turns reasoning off (`reasoningEffort: 'none'`), sets `maxRetries: 0`,
 and asks the Responses API not to store the response (`store: false`).
 Before sending, it checks a local ledger (`.m0-usage.json`) and refuses if the worst-case cost

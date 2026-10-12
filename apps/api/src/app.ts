@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import { trace } from '@opentelemetry/api';
-import type { LanguageModel } from 'ai';
+import type { ModelPort } from './llm/types.js';
 import { z } from 'zod';
 import { triage } from './assist/triage.js';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
@@ -18,7 +18,7 @@ export type AppDeps = {
   db: Db;
   keys: SigningKeys;
   provider: PaymentProvider;
-  model?: LanguageModel;
+  model?: ModelPort;
   corsOrigins?: string[];
 };
 

@@ -5,7 +5,7 @@
   "engines": { "node": ">=24 <27" },
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
-    "build": "pnpm -r run typecheck",
+    "build": "pnpm -r run typecheck && pnpm --filter @tadka/web build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "db:migrate": "pnpm --filter @tadka/api db:migrate",

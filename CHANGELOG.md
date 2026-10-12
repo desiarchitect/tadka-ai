@@ -25,14 +25,19 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - `RUNBOOK.md` (how to run this branch, command by command, with install steps for Windows, macOS and Linux) and this changelog.
 - Windows support: file paths built with `fileURLToPath`, and `.gitattributes` keeps LF line endings.
 - PowerShell versions of the install check, Quick start, walkthrough, port cleanup and teardown, so Windows users can use PowerShell or Git Bash.
-- Tests: 41 (33 API, 8 fake provider).
+- Visual client (`apps/web`): React 19, Vite, TypeScript, and semantic CSS. Customer food-assistant view with demo banner and collapsible Developer Demonstration Panel displaying real OTel trace ID, request ID, latency, model metadata, and safe error codes.
+- CORS support on `apps/api` using `@fastify/cors` restricted to local development origins (`:5173`, `:4173`).
+- OpenTelemetry trace ID and request ID propagation on all API responses (`x-trace-id`, `x-request-id`).
+- Authenticated `POST /assist/triage` endpoint for the EP0 vertical slice, guarded by customer token verification and Zod validation.
+- ADR 0001 (`docs/adr/0001-ep0-visual-client-and-cors.md`) and independent review (`docs/reviews/EP0_INDEPENDENT_REVIEW.md`).
+- Tests: 50 (39 API, 8 fake provider, 3 web client).
 
 ### Fixed
 - The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
 
 ### Verified
-- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 41 of 41 tests.
-- The dry-run probe, and the refusal to run `--live` without credentials.
+- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, build, and 50 of 50 tests.
+- The dry-run probe, and live call to Microsoft Foundry `gpt-5.4-mini`.
 
 ### Not in this branch
 - Chat, tools, RAG, the agent loop and refunds. They arrive in later episode branches.

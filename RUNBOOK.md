@@ -26,7 +26,7 @@ What you will see when it runs:
 | One typed answer from a language model, from Microsoft Foundry or the direct OpenAI API | `pnpm probe:llm` (section 10) |
 | A deterministic order-status route and a free-text intent route | Section 6 |
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
-| Comprehensive test suite across API, fake provider, and web client | `pnpm test` |
+| 278 passing tests (230 API + 13 fake provider + 35 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: tools, the agent loop, conversations, RAG, refunds, any action taken from a message. Those arrive in later episode branches.
 
@@ -624,7 +624,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 154 API tests and 35 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 230 API tests and 35 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -634,13 +634,15 @@ Expected: 13 fake-provider tests, 154 API tests and 35 web tests pass. Your dev 
 | `payments.test.ts` (5) | Cross-user payment is refused, timeout is resolved by lookup, error then retry charges once, paying twice is a no-op, the money constraint |
 | `triage.test.ts` (6) | The LLM call returns a typed object, rejects a bad shape and passes the adapter's options through untouched; the budget guard refuses before sending; a provider and model with no price is refused, even if another provider has one; every price row names its source and date |
 | `llm-config.test.ts` (8) | Provider selection: `LLM_PROVIDER` decides; an explicit provider without credentials is an error that names variables, never values; Azure-only settings still work, with a warning; both providers present and no choice is refused; the Azure deployment name is kept apart from the model we price |
-| `llm-contract.test.ts` (16) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
+| `llm-contract.test.ts` (18) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
 | `llm-boundary.test.ts` (6) | Only `src/llm` imports a vendor SDK, builds a provider client or builds provider option objects; scripts get their model from the same factory |
 | `assist-order-status.test.ts` (4) | The no-LLM route: own order, someone else's is 404, no token is 401, a bad id is 400 |
 | `intent-rules.test.ts` (6) | The five-label schema rejects unknown labels and extra fields; the keyword rules, their documented blind spot (negation) and the dev set |
 | `intent-classifier.test.ts` (6) | Each outcome with a fake provider: ok, a valid `other`, invalid output (five shapes), refusal, provider errors; no retry; the cost guards are sent |
 | `assist-intent.test.ts` (11) | Customers only, no identity in the body, one/several/no active orders, a failing lookup is a 500, labels that must not act change nothing in the database, fallbacks per outcome, rules by default |
-| `intent-eval.test.ts` (10) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent, the input estimate counting UTF-8 bytes, an unpriced model refused |
+| `intent-eval.test.ts` (18) | The frozen set (size, labels, no overlap with the dev set), **both frozen files pinned by SHA-256**, the rules' stable score, the new metrics (per-intent precision and recall, failure rates, latency percentiles, paired comparison) against hand-computed values, and the budget guard stopping before it sends |
+| `assist-intent-hardening.test.ts` (21) | `/assist/intent` against a fake provider that throws, hangs or answers badly, through the real classifier, route, limiter and logger: the timeout cuts a hung call off and the model sees the abort; the per-user limit (own quota, rejected requests use none); demo mode never calls the classifier; invalid and refused output; provider errors (401, 403, 429, 500, network, unexpected) with safe, useful logs and no retry |
+| `intent-startup.test.ts` (4) | The real process and `/assist/intent`: with a provider that RECORDS requests, demo mode with credentials makes zero provider calls (and a control shows the recorder catches a call outside demo mode); the template as copied answers from the keyword rules; a half-chosen provider still refuses to start |
 | `boundaries.test.ts` (4) | `assist` imports only the public orders service, and the model output has no field that can name a user |
 | `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
 | `guard.test.ts` (7) | The shared guard for model-spending routes on a bare app: 401/403 never use quota, the limit is per verified user, each route has its own quota, Retry-After, the timeout signal |

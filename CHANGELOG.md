@@ -20,11 +20,11 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - Evaluation: `pnpm eval:intent` over 40 frozen synthetic messages (19 Hinglish, 5 hard cases). A separate 8-message dev set is used for tuning. Failures count as wrong and are reported apart from a valid `other`. The dry run uses a stand-in model and checks the harness only; `--live` measures the real deployment and writes per-message results (outcome, tokens, cost, latency) to `.eval-runs/`.
 - Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed. The worst case estimates input tokens as the UTF-8 byte length of the prompt (a conservative estimate that does not undercount Devanagari, not a guaranteed bound), adds a fixed overhead and the full output cap, prices input and output separately, and refuses a model with no configured price.
 - `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
-- Tests: 110 (102 API, 8 fake provider), 41 of them new.
+- Tests: 278 (230 API, 13 fake provider, 35 web client).
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
-- CI runs on Node 24 (required) and Node 26 (an extra check that may fail without failing the workflow), and installs pnpm with npm because Node 25 and later have no corepack.
+- CI runs a Node 24 and Node 26 matrix; both jobs must pass (a failure on either fails the workflow), and pnpm is installed with npm because Node 25 and later have no corepack.
 - The classifier, the evaluator, the spending guard and `pnpm eval:intent` take their model, request options and price from the `ModelHandle` of the model boundary introduced on `ep00-start`; none of them names a provider. `.eval-runs` files record the model and the price row used.
 - The runbook is now for this branch; sections after the walkthrough moved down by one number.
 
@@ -32,8 +32,23 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
 
 ### Verified
-- Typecheck and 110 of 110 tests on Node 24 and Node 26.
+- Typecheck and 110 of 110 tests on Node 24 and Node 26 (the count at that time; the current count is in the remediation sections below).
 - On a local run: both new routes in bash and PowerShell, the dry-run evaluation (rules 24 of 40, hard cases 0 of 5).
+
+### Changed (remediation after the independent end-to-end review)
+- **EP-0's remediation is merged in**: the explicit startup decision (demo / live / off, one-line refusals, no uncaught exception; the template ships `LLM_PROVIDER` empty), the shared assist guard, and the web client fixes (panel layout, accessibility, favicon, required `VITE_API_URL` for production builds).
+- **`POST /assist/intent` now has the same protections as `/assist/triage`**, through the shared guard (`src/assist/guard.ts`): a per-user rate limit (`TRIAGE_RATE_LIMIT_PER_MIN`, its own quota on this route), and a bounded provider call (`TRIAGE_TIMEOUT_MS`, aborted at the timeout, no retries). In demo mode no LLM classifier is built, the keyword rules answer, and the response says `simulated: true`. Every response now has an explicit `simulated` field.
+- **Diagnosable failures.** A classification that produced no intent logs one structured warning: the outcome, a reason category, the provider's status, and its error code and request id when they look like identifiers. Never the customer's message, the model's output, provider text or a key. The client still sees only `assistant_unavailable`.
+- **Evaluation tooling** (the 40-message dataset is untouched and now pinned by SHA-256 in a test): per-intent precision and recall, failure and timeout rates, latency percentiles and a paired comparison; the output file records the prompt hash. `docs/evaluation/EP1_INTENT_EVAL_PLAN.md` is a **draft**: its decision rule needs thresholds only the owner can set, so the live evaluation has not been run.
+- Removed `apps/api/.vitest/json/output.json` (generated output from an ad-hoc run on another machine, committed by accident) and ignored `.vitest/`.
+
+### Fixed (remediation after the independent end-to-end review)
+- `cp .env.example .env` followed by starting the API failed on this branch even with `DEMO_MODE=1` (the provider was initialised before the demo check). Both now start.
+- A hung provider kept a `/assist/intent` request open indefinitely, and the route had no rate limit and ignored `DEMO_MODE`.
+
+### Verified (remediation, local only)
+- Typecheck, 278 of 278 tests (230 API, 13 fake provider, 35 web client), the production build and the bundle check, on Node 22, 24 and 26 against a local Postgres 16 without pgvector. CI results for these commits are reported separately, and are the only evidence for the pgvector image.
+- A real Chromium run against the real API and the production preview: see the review report. The live Foundry probe and the live intent evaluation were **not** run by this change.
 
 ### Not in this branch
 - Tools, the agent loop, conversations, RAG, refunds, and any action taken from a classification. They arrive in later episode branches.

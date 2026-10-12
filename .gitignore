@@ -6,3 +6,4 @@ node_modules/
 dist/
 logs/
 .m0-usage.json.*
+.vitest/

@@ -29,6 +29,9 @@ Episode 3: conversation memory. Starts from `ep02-typed-tool-calling`.
 - The boundary test covers the new files, allows `assist` to use the memory service only, and checks that the turn log line has no message text.
 - The runbook is now for this branch; sections after section 7 moved down by one number.
 
+### Fixed
+- A test-runner cache file (`apps/api/.vitest/`) was committed by mistake in `ep01-structured-intent`. It is no longer tracked and is ignored.
+
 ### Verified
 - Typecheck and 173 of 173 tests on Node 24 and Node 26.
 - On a clean clone: install, migrate, seed, `pnpm dev`; conversation and memory routes, and 503 for a message without a model, in bash and PowerShell; `pnpm assist:purge`.

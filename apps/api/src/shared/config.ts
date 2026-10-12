@@ -6,6 +6,7 @@ const env = z.object({
   PORT: z.coerce.number().default(3000),
   // Optional Ed25519 private key as a JWK JSON string. Unset = a fresh dev key per process.
   JWT_PRIVATE_JWK: z.string().optional(),
+  CORS_ORIGIN: z.string().optional(),
   // The model provider settings (LLM_PROVIDER, AZURE_*, OPENAI_API_KEY) are read by src/llm.
   M0_BUDGET_USD: z.coerce.number().default(5),
   // POST /assist/chat (EP2). The price comes from the provider and model (src/llm/pricing.ts); a pair

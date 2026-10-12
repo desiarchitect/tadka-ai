@@ -8,7 +8,7 @@ import { TOOL_SET } from '../src/assist/agent-loop.js';
 import { IntentOutput } from '../src/assist/intent.js';
 
 const dir = new URL('../src/assist/', import.meta.url);
-const files = readdirSync(dir, { recursive: true }).map(String).filter((f) => f.endsWith('.ts'));
+const files = readdirSync(dir, { recursive: true }).map(String).filter((f) => f.endsWith('.ts')).map((f) => f.replaceAll('\\', '/'));
 const importsOf = (f: string) =>
   [...readFileSync(new URL(f, dir), 'utf8').matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]!);
 
@@ -35,7 +35,7 @@ describe('assist imports only public interfaces', () => {
   });
 
   it('nothing in src imports the deliberately vulnerable demo', () => {
-    const all = readdirSync(new URL('../src/', import.meta.url), { recursive: true }).map(String).filter((f) => f.endsWith('.ts'));
+    const all = readdirSync(new URL('../src/', import.meta.url), { recursive: true }).map(String).filter((f) => f.endsWith('.ts')).map((f) => f.replaceAll('\\', '/'));
     const offenders = all.filter((f) => /from\s+'[^']*demo\//.test(readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8')));
     expect(offenders).toEqual([]);
   });

@@ -15,5 +15,7 @@ if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     instrumentations: [new HttpInstrumentation(), new PgInstrumentation(), new UndiciInstrumentation()],
   });
   sdk.start();
-  process.on('SIGTERM', () => void sdk.shutdown());
+  // main.ts runs the shutdown sequence and calls this last (see shutdown.ts). No signal handler here:
+  // a bare SIGTERM handler stops Node from exiting.
+  (globalThis as Record<symbol, unknown>)[Symbol.for('tadka.telemetry.stop')] = () => sdk.shutdown();
 }

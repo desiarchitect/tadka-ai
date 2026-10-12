@@ -1,31 +1,11 @@
-export type TriageIntent = 'order_status' | 'refund_request' | 'menu_question' | 'complaint' | 'other';
-export type TriageLanguage = 'en' | 'hi' | 'hinglish';
+import type { z } from 'zod';
+import type { LoginResponseSchema, TriageResponseSchema } from './schema.js';
 
-export type TriageOutput = {
-  intent: TriageIntent;
-  language: TriageLanguage;
-  needsHuman: boolean;
-  summary: string;
-};
-
-export type TriageResponse = {
-  output: TriageOutput;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-  };
-  modelId: string;
-  authenticatedAs?: {
-    userId: string;
-    role: string;
-  };
-};
-
-export type LoginResponse = {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-};
+export type TriageResponse = z.infer<typeof TriageResponseSchema>;
+export type TriageOutput = TriageResponse['output'];
+export type TriageIntent = TriageOutput['intent'];
+export type TriageLanguage = TriageOutput['language'];
+export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
 export type ApiDiagnostics = {
   httpStatus: number;
@@ -38,6 +18,7 @@ export type ApiDiagnostics = {
   userRole?: string;
   userId?: string;
   modelId?: string;
+  simulated?: boolean;
   tokenUsage?: {
     inputTokens?: number;
     outputTokens?: number;

@@ -1,8 +1,11 @@
 import React from 'react';
 
-type UserOption = 'rahul' | 'aman' | 'none';
+import type { DemoUser } from '../demo.js';
+
+type UserOption = DemoUser | 'none';
 
 interface AuthStatusProps {
+  demoLogin: boolean;
   currentUser: UserOption;
   userEmail: string | null;
   onSelectUser: (user: UserOption) => void;
@@ -10,11 +13,24 @@ interface AuthStatusProps {
 }
 
 export const AuthStatus: React.FC<AuthStatusProps> = ({
+  demoLogin,
   currentUser,
   userEmail,
   onSelectUser,
   isLoading,
 }) => {
+  if (!demoLogin) {
+    return (
+      <section className="auth-bar" aria-label="Authentication Controls">
+        <div className="auth-info">
+          <span className="auth-badge unauthenticated" role="status">
+            &#9675; Not signed in. The demo sign-in is switched off in this build.
+          </span>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="auth-bar" aria-label="Authentication Controls">
       <div className="auth-info">

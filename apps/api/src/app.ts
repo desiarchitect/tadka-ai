@@ -1,8 +1,12 @@
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import { AISDKError } from 'ai';
 import { trace } from '@opentelemetry/api';
 import type { ModelPort } from './llm/types.js';
 import { z } from 'zod';
+import { DEMO_MODEL_ID } from './assist/demo-model.js';
+import { classifyProviderError, safeErrorFields } from './assist/errors.js';
 import { triage } from './assist/triage.js';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
 import { IdentityService } from './identity/service.js';
@@ -20,7 +24,7 @@ import type { PaymentProvider } from './payments/provider.js';
 import { PaymentsService } from './payments/service.js';
 import { RestaurantsService } from './restaurants/service.js';
 import type { Db } from './shared/db.js';
-import { UnauthorizedError } from './shared/errors.js';
+import { ForbiddenError, UnauthorizedError } from './shared/errors.js';
 import type { Principal } from './shared/principal.js';
 
 // `providerOptions` and `config.priceKey` come from the ModelHandle built in src/llm.
@@ -33,12 +37,24 @@ export type AppDeps = {
   classify?: IntentClassifier;
   assistant?: AssistantDeps;
   model?: ModelPort;
+  /** True when `model` is the simulated demo model. Every triage response then says `simulated: true`. */
+  demo?: boolean;
   corsOrigins?: string[];
   logStream?: { write(line: string): void };
+  /** Per-user limit for POST /assist/triage. Basic abuse protection, not a spending cap. */
+  triageRateLimitPerMin?: number;
+  /** Upper bound on one provider call. */
+  triageTimeoutMs?: number;
+  logger?: FastifyServerOptions['logger'];
 };
 
+declare module 'fastify' {
+  interface FastifyRequest { principal?: Principal }
+}
+
 export function buildApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ logger: deps.logStream ? { level: 'info', stream: deps.logStream } : process.env.NODE_ENV !== 'test' && { level: 'info' } });
+  const loggerOption = deps.logger ?? (deps.logStream ? { level: 'info', stream: deps.logStream } : process.env.NODE_ENV !== 'test' && { level: 'info' });
+  const app = Fastify({ logger: loggerOption });
   const identity = new IdentityService(deps.db, deps.keys);
   const restaurants = new RestaurantsService(deps.db);
   const payments = new PaymentsService(deps.db, deps.provider);
@@ -58,7 +74,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         cb(null, true);
         return;
       }
-      cb(new Error('cors_not_allowed'), false);
+      // Not an error: the response just carries no CORS headers, so a browser will not let the page read it.
+      // CORS is a browser rule, not authorization; the token and role checks decide who may call.
+      cb(null, false);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
@@ -73,10 +91,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   // Map domain errors to HTTP. Anything without a status is a 500 with no details.
-  app.setErrorHandler((err: Error & { status?: number; statusCode?: number }, _req, reply) => {
-    const status = err.status ?? (err.statusCode && err.statusCode < 500 ? err.statusCode : 500);
-    if (status >= 500 && !err.status) app.log.error(err);
-    reply.code(status).send({ error: status >= 500 && !err.status ? 'internal_error' : err.message });
+  // AI SDK errors carry a provider `statusCode`; it is never the status we answer with.
+  app.setErrorHandler((err: Error & { status?: number; statusCode?: number; retryAfterSec?: number }, req, reply) => {
+    const fromSdk = AISDKError.isInstance(err);
+    const status = err.status ?? (!fromSdk && err.statusCode && err.statusCode < 500 ? err.statusCode : 500);
+    const hidden = status >= 500 && !err.status;
+    if (hidden) { if (fromSdk) req.log.error({ errorName: err.name }, 'unhandled AI SDK error'); else app.log.error(err); }
+    if (err.retryAfterSec) reply.header('retry-after', String(err.retryAfterSec));
+    reply.code(status).send({ error: hidden ? 'internal_error' : err.message });
   });
 
   const principal = async (req: FastifyRequest): Promise<Principal> => {
@@ -116,17 +138,45 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerConversationRoutes(app, { principal, parse, chat, conversations, memories, historyBudgetBytes: a?.historyBudgetBytes });
 
   const triageBody = z.object({ message: z.string().trim().min(1).max(500) });
-  app.post('/assist/triage', async (req) => {
+  // The caller's identity and role come from the verified token only, never from the request body.
+  const requireCustomer = async (req: FastifyRequest) => {
     const p = await principal(req);
-    const b = parse(triageBody, req.body);
-    if (!deps.model) throw Object.assign(new Error('provider_not_configured'), { status: 503 });
-    const r = await triage(deps.model, b.message);
-    return {
-      output: r.output,
-      usage: r.usage,
-      modelId: r.modelId ?? 'gpt-5.4-mini',
-      authenticatedAs: { userId: p.userId, role: p.role },
-    };
+    if (p.role !== 'Customer') throw new ForbiddenError('forbidden_role');
+    req.principal = p;
+  };
+  // The limiter attaches itself to routes through an onRoute hook, so it must be loaded BEFORE the route
+  // is declared. A plain `app.register(rateLimit)` is deferred and would leave the route unlimited.
+  // Only routes that set `config.rateLimit` are limited; `preHandler` lets the key be the verified user.
+  app.register(async (scope) => {
+    await scope.register(rateLimit, {
+      global: false,
+      hook: 'preHandler',
+      errorResponseBuilder: (_req, ctx) => Object.assign(new Error('rate_limited'), { status: 429, retryAfterSec: Math.ceil(ctx.ttl / 1000) }),
+    });
+    scope.post('/assist/triage', {
+      preHandler: requireCustomer, // the limiter's hook is added after this one, so it sees req.principal
+      config: { rateLimit: { max: deps.triageRateLimitPerMin ?? 10, timeWindow: '1 minute', keyGenerator: (req: FastifyRequest) => req.principal!.userId } },
+    }, async (req) => {
+      const p = req.principal!;
+      const b = parse(triageBody, req.body);
+      if (!deps.model) throw Object.assign(new Error('provider_not_configured'), { status: 503 });
+      try {
+        const r = await triage(deps.model, b.message, { abortSignal: AbortSignal.timeout(deps.triageTimeoutMs ?? 15_000) });
+        const simulated = deps.demo === true;
+        return {
+          output: r.output,
+          usage: r.usage,
+          simulated,
+          modelId: simulated ? DEMO_MODEL_ID : (r.modelId ?? 'unknown'),
+          authenticatedAs: { userId: p.userId, role: p.role },
+        };
+      } catch (err) {
+        const classified = classifyProviderError(err);
+        if (!classified) throw err;
+        req.log.warn(safeErrorFields(err, classified.message), 'assist: provider call failed');
+        throw classified;
+      }
+    });
   });
 
   return app;

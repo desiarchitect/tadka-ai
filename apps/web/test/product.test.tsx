@@ -111,6 +111,16 @@ describe('orders', () => {
   });
 });
 
+describe('diagnostics wording', () => {
+  it('a successful sign-in (no model call) is not described as a failed request', async () => {
+    globalThis.fetch = api();
+    render(<App />);
+    await screen.findByText('₹299.00');
+    expect(screen.getByText('No model involved in this request')).toBeInTheDocument();
+    expect(screen.queryByText('Unavailable on failed request')).not.toBeInTheDocument();
+  });
+});
+
 describe('session expiry', () => {
   it('a 401 on a quiet refresh (the list stays on screen) still ends the session', async () => {
     let expired = false;

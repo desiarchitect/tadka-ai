@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const root = new URL('../', import.meta.url);
-const list = (dir: string) => readdirSync(new URL(dir, root), { recursive: true }).map(String).filter((f) => f.endsWith('.ts')).map((f) => `${dir}${f}`);
+const list = (dir: string) => readdirSync(new URL(dir, root), { recursive: true }).map((f) => `${dir}${String(f).replaceAll('\\', '/')}`).filter((f) => f.endsWith('.ts'));
 const outside = [...list('src/'), ...list('scripts/')].filter((f) => !f.startsWith('src/llm/'));
 // Code only: drop whole-line and trailing // comments.
 const code = (f: string) => readFileSync(new URL(f, root), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');

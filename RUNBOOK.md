@@ -7,7 +7,8 @@ Every command below was run on a clean checkout before this runbook was written.
 
 `ep00-start` is the baseline of the series: a small food-delivery backend with login, restaurants,
 orders and a charge through a fake payment provider. It also holds one structured LLM call (the "probe")
-that proves the model provider is reachable.
+that proves the model provider is reachable. The model comes from one small module, `apps/api/src/llm`, so moving between
+Microsoft Foundry and the direct OpenAI API is a settings change (section 9, "Switch provider").
 
 What you will see when it runs:
 
@@ -16,8 +17,8 @@ What you will see when it runs:
 | A REST API with login, token refresh, restaurants, orders and payment | `http://localhost:3000` |
 | A fake payment provider you can make succeed, decline, time out or fail on demand | `http://localhost:4010` |
 | One request traced across both processes | Jaeger at `http://localhost:16686` |
-| 41 passing tests (33 API + 8 fake provider) | `pnpm test` |
-| One typed answer from a language model | `pnpm probe:llm` |
+| 69 passing tests (61 API + 8 fake provider) | `pnpm test` |
+| One typed answer from a language model, from Microsoft Foundry or the direct OpenAI API | `pnpm probe:llm` (section 9) |
 
 What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, refunds. Those arrive in later episode branches.
 
@@ -169,12 +170,15 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
 | `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
-| `AZURE_RESOURCE_NAME` | empty | Only for `--live` | The name of your Azure resource. See section 9 |
-| `AZURE_API_KEY` | empty | Only for `--live` | KEY 1 of that resource. See section 9 |
-| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | Only for `--live` | The name you gave the model deployment. See section 9 |
+| `LLM_PROVIDER` | `azure` | Only for `--live` | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). See section 9 |
+| `LLM_MODEL` | `gpt-5.4-mini` | No | The model the budget prices and the evaluations record. Not the Azure deployment name |
+| `AZURE_RESOURCE_NAME` | empty | With `LLM_PROVIDER=azure` | The name of your Azure resource. See section 9 |
+| `AZURE_API_KEY` | empty | With `LLM_PROVIDER=azure` | KEY 1 of that resource. See section 9 |
+| `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | With `LLM_PROVIDER=azure` | The name you gave the model deployment. It must be named like a GPT model. See section 9 |
+| `OPENAI_API_KEY` | empty | With `LLM_PROVIDER=openai` | Your key for the direct OpenAI API. See section 9 |
 | `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe |
 
-Everything except the three `AZURE_*` values already works as copied. You can run the whole branch, including all tests and
+Everything except the provider credentials already works as copied. You can run the whole branch, including all tests and
 the dry-run probe, without filling anything in.
 
 Do not set `PORT` in `.env`: the API (3000) and the fake provider (4010) both read it and would collide.
@@ -408,7 +412,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 8 fake-provider tests and 33 API tests pass. Your dev database is never touched.
+Expected: 8 fake-provider tests and 61 API tests pass. Your dev database is never touched.
 
 | File | What it proves |
 |---|---|
@@ -416,18 +420,39 @@ Expected: 8 fake-provider tests and 33 API tests pass. Your dev database is neve
 | `refresh-tokens.test.ts` (9) | Rotation, reuse detection, concurrent refresh, logout, expiry, only a hash is stored |
 | `orders.test.ts` (6) | Customers see only their orders, other people's orders return 404, owners see no address, admins see all, the state machine rejects bad moves |
 | `payments.test.ts` (5) | Cross-user payment is refused, timeout is resolved by lookup, error then retry charges once, paying twice is a no-op, the money constraint |
-| `triage.test.ts` (4) | The LLM call returns a typed object and rejects a bad shape; the budget guard refuses before sending |
+| `triage.test.ts` (6) | The LLM call returns a typed object, rejects a bad shape and passes the adapter's options through untouched; the budget guard refuses before sending; a provider and model with no price is refused, even if another provider has one; every price row names its source and date |
+| `llm-config.test.ts` (8) | Provider selection: `LLM_PROVIDER` decides; an explicit provider without credentials is an error that names variables, never values; Azure-only settings still work, with a warning; both providers present and no choice is refused; the Azure deployment name is kept apart from the model we price |
+| `llm-contract.test.ts` (12) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
+| `llm-boundary.test.ts` (6) | Only `src/llm` imports a vendor SDK, builds a provider client or builds provider option objects; scripts get their model from the same factory |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
 ## 9. The LLM probe
 
 ```bash
 pnpm probe:llm                 # dry run: a fake model, no key, no network, no cost
-pnpm probe:llm -- --live       # ONE real call to the series model (gpt-5.4-mini on Microsoft Foundry)
+pnpm probe:llm -- --live       # ONE real call to the series model (gpt-5.4-mini) on the provider LLM_PROVIDER names
 ```
 
 The dry run prints a typed answer (`intent`, `language`, `needsHuman`, `summary`) from a fake model. It proves the
 code path and the schema, not the provider.
+
+### Switch provider
+
+The probe, and everything built on it in later branches, asks `apps/api/src/llm` for its model. Provider choice is configuration only:
+
+| You want | Put in `.env` |
+|---|---|
+| Microsoft Foundry (the series default) | `LLM_PROVIDER=azure`, `AZURE_RESOURCE_NAME`, `AZURE_API_KEY`, `AZURE_DEPLOYMENT` |
+| The direct OpenAI API | `LLM_PROVIDER=openai`, `OPENAI_API_KEY` |
+
+Rules the module enforces, each tested:
+
+- **Choose explicitly.** With `LLM_PROVIDER` unset, Azure settings alone still work but print a warning; if both Azure and OpenAI settings are present and `LLM_PROVIDER` is unset, it refuses to guess. An `OPENAI_API_KEY` alone never selects OpenAI.
+- **The two protections follow the provider.** Both adapters send `store: false` (no provider-side storage) and no reasoning tokens, each under that provider's own option name. The adapter contract tests check the request each one really sends.
+- **Prices follow the provider.** The budget looks up `provider:model` (`azure:gpt-5.4-mini`). There is no price row for `openai` yet, so `LLM_PROVIDER=openai pnpm probe:llm -- --live` stops with `Nothing was sent` until you add one in `apps/api/src/llm/pricing.ts` from OpenAI's price list, with its source and today's date. Do not reuse Foundry's numbers without checking them.
+- **Deployment name is not model name.** The model we price and evaluate is `LLM_MODEL`. On Azure, `AZURE_DEPLOYMENT` is only the name of your deployment, and it must be named like a GPT model (`gpt-5.4-mini`, `gpt-5.4-mini-1`): the AI SDK reads the name to decide the model supports the reasoning setting, and a name such as `my-deployment` is refused.
+
+Same code, different provider does not mean the same behaviour. Structured output, token counts and error text can differ, so run your own checks on the provider you switch to.
 
 ### Run the live call: where each Azure value goes
 
@@ -493,23 +518,25 @@ A good run prints JSON with `"mode": "live"`, your `deployment`, a typed `output
 
 | Message or symptom | Likely cause | Fix |
 |---|---|---|
-| `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | A value is empty or `.env` is not in the repository root | Fill both, save, run again from the repository root |
+| `LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | A value is empty or `.env` is not in the repository root | Fill both, save, run again from the repository root |
+| `AZURE_DEPLOYMENT "..." is not named like a GPT model` | The deployment has a name the AI SDK cannot recognise | Create or choose a deployment named like `gpt-5.4-mini` |
+| `Nothing was sent. budget: no price configured for ...` | This provider and model have no price row | Add one in `apps/api/src/llm/pricing.ts` (section 9, Switch provider) |
 | 401 (access denied) | Wrong or regenerated key | Copy KEY 1 again |
 | 404 or `DeploymentNotFound` | `AZURE_DEPLOYMENT` does not match the deployment name | Copy the name exactly from the **Deployments** list |
 | `ENOTFOUND` or a connection error | `AZURE_RESOURCE_NAME` is wrong (for example the full URL) | Use only the name before the first dot |
-| An error about `reasoningEffort` | The deployment does not accept `none` | Change `reasoningEffort` to `'low'` in `apps/api/src/assist/triage.ts` and remove the `temperature` line |
+| An error about `reasoningEffort` | The deployment does not accept `none` | Change `reasoningEffort` to `'low'` in `apps/api/src/llm/azure.ts` and remove the `temperature` line in `apps/api/src/assist/triage.ts` |
 
 What the live call does, and why:
 
 | Setting | Why |
 |---|---|
 | One synthetic Hinglish message | No real customer data leaves your machine |
-| `reasoningEffort: 'none'` | A classification does not need reasoning tokens, which are billed as output |
+| `reasoningEffort: 'none'` (set by the adapter) | A classification does not need reasoning tokens, which are billed as output |
 | `maxOutputTokens: 400`, `maxRetries: 0` | A hard ceiling per call, and no silent retries that spend money |
 | `store: false` | The Responses API keeps responses by default; this asks it not to |
 | Budget ledger `.m0-usage.json` | Before sending, the probe adds the worst-case cost of this call to what you have spent. If that would pass `M0_BUDGET_USD` (default 5), it refuses and sends nothing |
 
-It prints the deployment name, latency, token usage and cost. One call costs a fraction of a cent. Also set a budget alert on
+It prints the model and deployment, the price row it used, any warning the SDK raised about a setting it could not apply, latency, token usage and cost. One call costs a fraction of a cent. Also set a budget alert on
 your Azure resource group (not required to run the branch): an alert only notifies, while the ledger is what stops the call.
 
 ## 10. Troubleshooting

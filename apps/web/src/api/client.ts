@@ -1,6 +1,6 @@
 import type { z } from 'zod';
-import { ErrorBodySchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
-import type { ApiDiagnostics, LoginResponse, Menu, Order, OrderDetail, Restaurant, TriageResponse } from './types.js';
+import { ErrorBodySchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, OrderStatusResponseSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
+import type { ApiDiagnostics, IntentResponse, LoginResponse, Menu, Order, OrderDetail, OrderStatusResponse, Restaurant, TriageResponse } from './types.js';
 
 // Where the API is. VITE_API_URL is compiled into the bundle, so it must be set when a production build is made.
 // The localhost default exists only for local development (`vite`, the tests): a production build that was made
@@ -80,6 +80,17 @@ const payMessage = (status: number, code: string): string => {
   if (status === 502) return 'We could not confirm the payment with the payment provider. Please check the order status before trying again.';
   return dataMessage(status, code);
 };
+const intentMessage = (status: number, code: string): string => {
+  switch (code) {
+    case 'missing_token': case 'invalid_token': return 'Authentication required. Please sign in as a customer.';
+    case 'customers_only': case 'forbidden_role': return 'Only customer accounts can use the assistant.';
+    case 'rate_limited': return 'Too many requests. Please wait a minute and try again.';
+    case 'assistant_unavailable': return 'The classifier could not answer right now. Please try again.';
+    case 'invalid_request': return 'Invalid message (it must be 1 to 500 characters).';
+  }
+  if (status >= 500) return 'Server error while classifying the message.';
+  return 'Request failed';
+};
 const loginMessage = (_status: number, code: string): string => (code === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed');
 
 export class ApiClient {
@@ -106,6 +117,19 @@ export class ApiClient {
         tokenUsage: data.usage ? { inputTokens: data.usage.inputTokens, outputTokens: data.usage.outputTokens } : undefined,
       }),
     });
+  }
+
+  /** Classification only: one label from a fixed list. What happens next is chosen by server code, not the model. */
+  intent(text: string, accessToken: string | null, signal?: AbortSignal): Promise<Result<IntentResponse>> {
+    return this.send({
+      path: '/assist/intent', body: { text }, token: accessToken, signal, schema: IntentResponseSchema, describe: intentMessage,
+      onSuccess: (data) => ({ simulated: data.simulated }),
+    });
+  }
+
+  /** A plain lookup by the server (no model): the status of one order the caller owns. */
+  orderStatus(orderId: string, token: string, signal?: AbortSignal): Promise<Result<OrderStatusResponse>> {
+    return this.send({ method: 'GET', path: `/assist/order-status?orderId=${encodeURIComponent(orderId)}`, token, signal, schema: OrderStatusResponseSchema, describe: dataMessage });
   }
 
   logout(refreshToken: string, signal?: AbortSignal): Promise<Result<null>> {

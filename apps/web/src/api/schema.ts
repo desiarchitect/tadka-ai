@@ -51,3 +51,24 @@ export const OrderDetailSchema = OrderSchema.extend({
 
 /** POST /auth/logout answers 204 with no body. */
 export const NoContentSchema = z.null();
+
+// ---- EP-1: /assist/intent (classification) and /assist/order-status (a direct lookup, no model) ----
+export const INTENTS = ['order_status', 'cancel_order', 'refund_request', 'menu_question', 'other'] as const;
+const OrderRef = z.object({ orderId: z.string(), status: z.string() });
+export const NextStepSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('order_status'), order: OrderRef }),
+  z.object({ action: z.literal('choose_order'), message: z.string(), orders: z.array(OrderRef) }),
+  z.object({ action: z.literal('no_active_orders'), message: z.string() }),
+  z.object({ action: z.literal('unsupported'), message: z.string() }),
+  z.object({ action: z.literal('clarify'), message: z.string() }),
+  z.object({ action: z.literal('fallback'), message: z.string() }),
+]);
+/** `intent` is present only when `outcome` is "ok". The server sends no confidence score, and none is shown. */
+export const IntentResponseSchema = z.object({
+  outcome: z.string(),
+  classifier: z.enum(['llm', 'rules']),
+  simulated: z.boolean(),
+  intent: z.enum(INTENTS).optional(),
+  next: NextStepSchema,
+});
+export const OrderStatusResponseSchema = OrderRef;

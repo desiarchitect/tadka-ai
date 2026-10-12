@@ -1,15 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, isCancelled, resolveApiBaseUrl } from './api/client.js';
-import type { ApiDiagnostics, TriageResponse } from './api/types.js';
+import type { ApiDiagnostics, IntentResponse, TriageResponse } from './api/types.js';
 import { AuthStatus, type Identity } from './components/AuthStatus.js';
 import { Capabilities } from './components/Capabilities.js';
 import { CustomerView } from './components/CustomerView.js';
 import { DeveloperPanel } from './components/DeveloperPanel.js';
+import { IntentCard } from './components/IntentCard.js';
 import { Header } from './components/Header.js';
 import { OrdersPanel } from './components/OrdersPanel.js';
 import { RestaurantsPanel } from './components/RestaurantsPanel.js';
 import { SideTabs } from './components/SideTabs.js';
 import { demoCredentials, demoLoginEnabled, type DemoUser } from './demo.js';
+import { HAS_INTENT } from './episode.js';
 import { useLoad } from './hooks/useLoad.js';
 
 export const NO_API_URL_MESSAGE = 'This build has no API address, so it cannot reach the server. Rebuild it with VITE_API_URL set, for example: VITE_API_URL=https://api.example.com pnpm --filter @tadka/web build';
@@ -25,6 +27,8 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [result, setResult] = useState<TriageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [intentResult, setIntentResult] = useState<IntentResponse | null>(null);
+  const [intentError, setIntentError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ApiDiagnostics | null>(null);
   // The assistant / sign-in request in flight, if any. Starting a new one or leaving the page cancels the old one.
@@ -41,6 +45,7 @@ export const App: React.FC = () => {
     inFlight.current = controller;
     setIsLoading(true);
     setError(null);
+    setIntentError(null);
     return controller;
   };
   const end = (controller: AbortController) => {
@@ -64,6 +69,8 @@ export const App: React.FC = () => {
     setSession(null);
     setResult(null);
     setError(null);
+    setIntentResult(null);
+    setIntentError(null);
     setDiagnostics(null);
     const old = refreshTokenRef.current;
     refreshTokenRef.current = null;
@@ -127,6 +134,24 @@ export const App: React.FC = () => {
     }
   };
 
+  // EP-1: classification only. The server returns a label and a next step it chose itself.
+  const handleIntentSubmit = async (text: string) => {
+    const controller = begin();
+    setIntentResult(null);
+    try {
+      const res = await apiClient.intent(text, session?.token ?? null, controller.signal);
+      setIntentResult(res.data);
+      setDiagnostics(res.diagnostics);
+    } catch (err: unknown) {
+      if (isCancelled(err)) return;
+      const diag = (err as { diagnostics?: ApiDiagnostics }).diagnostics;
+      if (diag) setDiagnostics(diag);
+      setIntentError((err as Error).message || 'Request failed');
+    } finally {
+      end(controller);
+    }
+  };
+
   const handleCancel = () => inFlight.current?.abort();
 
   const handleReset = () => {
@@ -158,6 +183,15 @@ export const App: React.FC = () => {
             onReset={handleReset}
             unavailableReason={!apiConfigured ? NO_API_URL_MESSAGE : session || demoLogin ? null : 'Sign in to use the assistant.'}
           />
+          {HAS_INTENT && (
+            <IntentCard
+              onSubmit={handleIntentSubmit}
+              isLoading={isLoading}
+              result={intentResult}
+              error={intentError}
+              unavailableReason={!apiConfigured ? NO_API_URL_MESSAGE : session || demoLogin ? null : 'Sign in to use the assistant.'}
+            />
+          )}
           <Capabilities />
         </div>
         <div className="col-side">
@@ -168,7 +202,7 @@ export const App: React.FC = () => {
                 {
                   id: 'orders', label: 'Orders',
                   panel: session
-                    ? <OrdersPanel key={session.id} token={session.token} restaurants={restaurants.state} onUnauthorized={onUnauthorized} />
+                    ? <OrdersPanel key={session.id} token={session.token} statusLookup={HAS_INTENT} restaurants={restaurants.state} onUnauthorized={onUnauthorized} />
                     : <section className="panel" aria-labelledby="orders-signed-out"><h2 id="orders-signed-out" className="panel-title">Your orders</h2><p className="muted">Sign in to see your orders.</p></section>,
                 },
                 { id: 'restaurants', label: 'Restaurants', panel: <RestaurantsPanel restaurants={restaurants.state} onRetry={restaurants.reload} /> },

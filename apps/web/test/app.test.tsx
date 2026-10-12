@@ -182,7 +182,7 @@ describe('Tadka Visual Client, demo sign-in OFF (a production build)', () => {
     globalThis.fetch = fetchMock;
     render(<App />);
     await screen.findByText(/demo sign-in is switched off/i);
-    expect(screen.getByText(/Sign in to use the assistant/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Sign in to use the assistant/).length).toBeGreaterThan(0); // the triage card and the EP-1 intent card both say it
     expect(screen.getByRole('button', { name: /Submit to Assistant/i })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /Sign in as/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/rahul@tadka.test/)).not.toBeInTheDocument();
@@ -211,7 +211,7 @@ describe('Tadka Visual Client, a production build made without VITE_API_URL', ()
     globalThis.fetch = fetchMock;
     render(<App />);
     await screen.findAllByText(/no API address/i);
-    expect(screen.getByText(/VITE_API_URL=https:\/\/api\.example\.com/)).toBeInTheDocument();
+    expect(screen.getAllByText(/VITE_API_URL=https:\/\/api\.example\.com/).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /Submit to Assistant/i })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /Sign in as/i })).not.toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 50));

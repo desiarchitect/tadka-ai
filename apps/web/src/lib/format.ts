@@ -19,3 +19,6 @@ const LABELS: Record<Order['status'], string> = {
   Cancelled: 'Cancelled',
 };
 export const statusLabel = (s: Order['status']): string => LABELS[s];
+
+/** For a status that arrives as plain text (the lookup routes send it unvalidated): the friendly label, or the text itself. */
+export const statusLabelOr = (s: string): string => (LABELS as Record<string, string>)[s] ?? s;

@@ -26,7 +26,7 @@ What you will see when it runs:
 | One typed answer from a language model, from Microsoft Foundry or the direct OpenAI API | `pnpm probe:llm` (section 10) |
 | A deterministic order-status route and a free-text intent route | Section 6 |
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
-| 314 passing tests (230 API + 13 fake provider + 71 web client) | `pnpm test` |
+| 334 passing tests (230 API + 13 fake provider + 91 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: tools, the agent loop, conversations, RAG, refunds, any action taken from a message. Those arrive in later episode branches.
 
@@ -271,7 +271,8 @@ Open `http://localhost:5173` in any browser while `pnpm dev` is running:
 7. **Browse your orders and the menus** (right of the assistant, stacked below it on a phone): the **Orders** tab lists the signed-in customer's orders from `GET /orders` with restaurant, status and total; **Details** reads `GET /orders/:id` and shows the items. The **Restaurants** tab lists `GET /restaurants`; **Show menu** reads `GET /restaurants/:id/menu` (name and price only: the API has no dietary data, so none is shown). These come straight from the API; the assistant in this build (triage) does not read them.
 8. **Pay a seeded order**: Rahul has one `Placed` order (Spice Garden, ₹299.00). Click **Pay**: the server charges the fake payment provider and the order becomes `Confirmed`. A second payment for it is safe (the server answers with the same order, one payment row). Only that one order can be paid, and only once; to repeat the demo run `pnpm db:seed` again (section 7). If an order moved on while the page was open, the server answers 409 and the page says so and refreshes the list.
 9. **Switch customers**: **Sign in as Aman** aborts anything in flight, clears Rahul's orders, details and assistant result, then loads Aman's. The server decides what each token may see: asking for Rahul's order with Aman's token is a 404. Without the demo sign-in (a production build) use the email and password form (`rahul@tadka.test` / `Password123!`).
-10. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
+10. **Classify an intent (EP-1)**: the **Intent classification** card sends your message to `POST /assist/intent`. The result has two parts, kept apart on screen: (1) the **classification**, one label, labelled as coming from the language model or from the keyword rules (`SIMULATED` in demo mode), and (2) the **next step**, chosen by server code from that label (for `order_status` the server reads your orders itself; the model never sees them). No confidence score is shown because the API sends none. **Check status (server lookup)** on an order calls `GET /assist/order-status` directly: no model is involved, and the page says so.
+11. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
 
 
 ### Recording a demo (the explicit opt-in)
@@ -627,7 +628,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 230 API tests and 71 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 230 API tests and 91 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|

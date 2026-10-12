@@ -170,6 +170,52 @@ describe('ApiClient product calls', () => {
   });
 });
 
+describe('ApiClient EP-1 calls', () => {
+  const ok = { outcome: 'ok', classifier: 'rules', simulated: false, intent: 'other', next: { action: 'clarify', message: 'm' } };
+
+  it('intent sends only { text } and the token, and keeps the classifier and simulated flags', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, ok));
+    globalThis.fetch = f;
+    const out = await new ApiClient('http://x').intent('hello', 'tok');
+    expect(JSON.parse(String((f.mock.calls[0]![1] as RequestInit).body))).toEqual({ text: 'hello' });
+    expect(f.mock.calls[0]![0]).toBe('http://x/assist/intent');
+    expect(out.data.classifier).toBe('rules');
+    expect(out.diagnostics.simulated).toBe(false);
+  });
+
+  it('intent responses are validated: an unknown next-step action, an unknown intent or a missing classifier is invalid_response', async () => {
+    for (const bad of [{ ...ok, next: { action: 'refund_now', message: 'x' } }, { ...ok, intent: 'pay_me' }, { outcome: 'ok', simulated: false, next: ok.next }]) {
+      globalThis.fetch = vi.fn().mockResolvedValue(res(200, bad));
+      expect((await failure(new ApiClient('http://x').intent('hi', 't')))?.diagnostics.errorCode).toBe('invalid_response');
+    }
+  });
+
+  it('a non-ok outcome with no intent is accepted as such (nothing is invented)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { outcome: 'invalid_output', classifier: 'llm', simulated: false, next: { action: 'fallback', message: 'm' } }));
+    const out = await new ApiClient('http://x').intent('hi', 't');
+    expect(out.data.intent).toBeUndefined();
+  });
+
+  it.each([
+    [403, 'customers_only', /Only customer accounts/],
+    [502, 'assistant_unavailable', /classifier could not answer/],
+    [429, 'rate_limited', /Too many requests/],
+  ])('intent %i %s has its own wording and never shows the code', async (status, code, message) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(status, { error: code }, false));
+    const err = await failure(new ApiClient('http://x').intent('hi', 't'));
+    expect(err?.message).toMatch(message);
+    expect(err?.message).not.toContain(code);
+  });
+
+  it('orderStatus is a GET with the order id encoded into the query', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, { orderId: 'a', status: 'Preparing' }));
+    globalThis.fetch = f;
+    await new ApiClient('http://x').orderStatus('a&b=1', 'tok');
+    expect(f.mock.calls[0]![0]).toBe('http://x/assist/order-status?orderId=a%26b%3D1');
+    expect((f.mock.calls[0]![1] as RequestInit).method).toBe('GET');
+  });
+});
+
 describe('which API address a build uses', () => {
   it('uses VITE_API_URL when it is set, in development and in production', () => {
     expect(resolveApiBaseUrl({ VITE_API_URL: 'https://api.example.com', DEV: false })).toBe('https://api.example.com');

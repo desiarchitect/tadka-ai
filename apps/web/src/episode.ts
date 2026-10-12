@@ -4,6 +4,9 @@ export type Capability = { episode: string; name: string; available: boolean; wh
 
 export const ASSISTANT_CAPABILITIES: Capability[] = [
   { episode: 'EP-0', name: 'Triage', available: true, what: 'Classifies the message (intent, language, escalation) and writes a short summary. It does not read your orders.' },
-  { episode: 'EP-1', name: 'Structured intent', available: false, what: 'Returns one intent label from a fixed list, then server code decides the next step.' },
+  { episode: 'EP-1', name: 'Structured intent', available: true, what: 'Returns one intent label from a fixed list (classification only: it does not read your orders). Server code, not the model, decides the next step.' },
   { episode: 'EP-2', name: 'Tool lookup', available: false, what: 'Looks up your orders through validated, authorised tools before answering.' },
 ];
+
+/** Whether this build has the EP-1 client features (the intent card and the direct order-status lookup). */
+export const HAS_INTENT = ASSISTANT_CAPABILITIES.some((c) => c.episode === 'EP-1' && c.available);

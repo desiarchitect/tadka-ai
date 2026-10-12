@@ -27,6 +27,9 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - CI runs on Node 24 (required) and Node 26 (an extra check that may fail without failing the workflow), and installs pnpm with npm because Node 25 and later have no corepack.
 - The runbook is now for this branch; sections after the walkthrough moved down by one number.
 
+### Fixed
+- The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
+
 ### Verified
 - Typecheck and 82 of 82 tests on Node 24 and Node 26.
 - On a local run: both new routes in bash and PowerShell, the dry-run evaluation (rules 24 of 40, hard cases 0 of 5).

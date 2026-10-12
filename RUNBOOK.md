@@ -323,15 +323,24 @@ Paste the helpers once into the second terminal:
 function Call($Method, $Path, $Token, $Body, $Port = 3000) {
   $p = @{ Method = $Method; Uri = "http://localhost:$Port$Path"; UseBasicParsing = $true; Headers = @{} }
   if ($Token) { $p.Headers.authorization = "Bearer $Token" }
-  $p.ContentType = 'application/json'
-  $p.Body = if ($Body) { $Body | ConvertTo-Json -Compress } else { '{}' }
+  if ($Method -eq 'POST' -or $Method -eq 'PUT') {
+    # Only POST and PUT send a body: Windows PowerShell 5.1 refuses one on GET. Sent as UTF-8 JSON.
+    $json = if ($Body) { $Body | ConvertTo-Json -Compress } else { '{}' }
+    $p.ContentType = 'application/json; charset=utf-8'
+    $p.Body = [System.Text.Encoding]::UTF8.GetBytes($json)
+  }
   try { (Invoke-WebRequest @p).Content }
-  catch { "{0} [{1}]" -f ($_.ErrorDetails.Message | ConvertFrom-Json | ConvertTo-Json -Compress), [int]$_.Exception.Response.StatusCode }
+  catch {
+    $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 'no response' }
+    $text = if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+    try { $text = $text | ConvertFrom-Json | ConvertTo-Json -Compress } catch { }
+    "{0} [{1}]" -f $text, $status
+  }
 }
 function Login($Email) { (Call POST /auth/login $null @{ email = $Email; password = 'Password123!' } | ConvertFrom-Json).accessToken }
 ```
 
-`Call METHOD /path TOKEN BODY PORT` sends the request. Errors print as `{"error":"..."} [status]`, like the bash examples. Then:
+`Call METHOD /path TOKEN BODY PORT` sends the request. Errors print as `{"error":"..."} [status]`, like the bash examples. If the API is not running you see `... [no response]`. Then:
 
 ```powershell
 Call GET /health                                   # {"status":"ok"}
@@ -656,6 +665,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | Pay ignores the lever you set | The order was already paid or declined. After a re-seed the provider still replays its stored result for that order's key | Restart `pnpm dev` after `pnpm db:seed` (section 7) |
 | `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | `--live` without credentials | Fill them in `.env` |
 | No traces in Jaeger | Jaeger is not running, or `OTEL_EXPORTER_OTLP_ENDPOINT` is empty | Start with `--profile observability`; check `.env` |
+| PowerShell prints `ConvertFrom-Json : Cannot bind argument to parameter 'InputObject' because it is null` and `[0]` | The `Call` helper from an older copy of this runbook sent a body with GET requests, which Windows PowerShell 5.1 refuses | Paste the `Call` and `Login` helpers from section 5 again |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |
 
 ## 12. Teardown

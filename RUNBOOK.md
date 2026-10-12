@@ -280,8 +280,10 @@ Steps for a simulated recording:
 3. Submit a message. Check for the SIMULATED badge and `demo-mock` before you start recording.
 
 Notes: while `DEMO_MODE=1` a real provider setting is ignored, so set it back to `0` (or empty) when you want the real model.
-`pnpm dev` also runs the web page with its demo sign-in on. A production build of the page (`pnpm build`) has the demo sign-in off and cannot be used to
-record; for a recorded build of the page use `VITE_DEMO_LOGIN=1 pnpm --filter @tadka/web build`.
+`pnpm dev` also runs the web page with its demo sign-in on, and with the API at `http://localhost:3000`. A production build of the page (`pnpm build`)
+has the demo sign-in off and cannot be used to record. For a recorded build of the page, set both settings when you build, because they are compiled into the page:
+`VITE_DEMO_LOGIN=1 VITE_API_URL=http://localhost:3000 pnpm --filter @tadka/web build`, then `pnpm --filter @tadka/web preview` (it serves on port 4173, which the API allows).
+`VITE_API_URL` is **required** for every production build: without it the page has no API address, shows what to set, and sends nothing (it never falls back to `localhost`).
 
 Run these in a second terminal. First, a helper that logs in and prints a token:
 
@@ -665,6 +667,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | PowerShell prints `ConvertFrom-Json : Cannot bind argument to parameter 'InputObject' because it is null` and `[0]` | The `Call` helper from an older copy of this runbook sent a body with GET requests, which Windows PowerShell 5.1 refuses | Paste the `Call` and `Login` helpers from section 5 again |
 | The browser says "No AI model is configured on the server" (`503 provider_not_configured`) | No provider credentials, and `DEMO_MODE` is off | Add credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart |
 | The page says "Not signed in. The demo sign-in is switched off" | The client was built without `VITE_DEMO_LOGIN=1` (a production build) | Use `pnpm dev`, or build with `VITE_DEMO_LOGIN=1` |
+| The page says "This build has no API address" | A production build was made without `VITE_API_URL` | Rebuild with `VITE_API_URL` set to the API's address (for local use `http://localhost:3000`) |
 | `DEMO_MODE must be "1" or "0"` at start | `DEMO_MODE` has another value (`true`, `yes`) | Use `1`, `0` or leave it empty |
 | `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |

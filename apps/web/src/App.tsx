@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { apiClient, isCancelled } from './api/client.js';
+import { apiClient, isCancelled, resolveApiBaseUrl } from './api/client.js';
 import type { ApiDiagnostics, TriageResponse } from './api/types.js';
 import { AuthStatus } from './components/AuthStatus.js';
 import { CustomerView } from './components/CustomerView.js';
@@ -9,8 +9,12 @@ import { demoCredentials, demoLoginEnabled, type DemoUser } from './demo.js';
 
 type UserOption = DemoUser | 'none';
 
+export const NO_API_URL_MESSAGE = 'This build has no API address, so it cannot reach the server. Rebuild it with VITE_API_URL set, for example: VITE_API_URL=https://api.example.com pnpm --filter @tadka/web build';
+
 export const App: React.FC = () => {
   const demoLogin = demoLoginEnabled();
+  // A production build has no default API address (see resolveApiBaseUrl): without one, nothing is sent anywhere.
+  const apiConfigured = resolveApiBaseUrl() !== null;
   const [currentUser, setCurrentUser] = useState<UserOption>('none');
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -40,7 +44,7 @@ export const App: React.FC = () => {
 
   // Demo sign-in as Rahul on load, only in a build that has it switched on (VITE_DEMO_LOGIN=1).
   useEffect(() => {
-    if (!demoLogin) return;
+    if (!demoLogin || !apiConfigured) return;
     void loginAs('rahul');
     return () => inFlight.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,23 +105,26 @@ export const App: React.FC = () => {
   return (
     <div className="app-container">
       <Header />
-      <AuthStatus
-        demoLogin={demoLogin}
-        currentUser={currentUser}
-        userEmail={userEmail}
-        onSelectUser={loginAs}
-        isLoading={isLoading}
-      />
-      <CustomerView
-        onSubmit={handleTriageSubmit}
-        onCancel={handleCancel}
-        isLoading={isLoading}
-        result={result}
-        error={error}
-        onReset={handleReset}
-        unavailableReason={demoLogin ? null : 'Sign-in is not available in this build, so the assistant cannot be used here.'}
-      />
-      <DeveloperPanel diagnostics={diagnostics} />
+      <main className="app-main">
+        <AuthStatus
+          demoLogin={demoLogin && apiConfigured}
+          apiConfigured={apiConfigured}
+          currentUser={currentUser}
+          userEmail={userEmail}
+          onSelectUser={loginAs}
+          isLoading={isLoading}
+        />
+        <CustomerView
+          onSubmit={handleTriageSubmit}
+          onCancel={handleCancel}
+          isLoading={isLoading}
+          result={result}
+          error={error}
+          onReset={handleReset}
+          unavailableReason={!apiConfigured ? NO_API_URL_MESSAGE : demoLogin ? null : 'Sign-in is not available in this build, so the assistant cannot be used here.'}
+        />
+        <DeveloperPanel diagnostics={diagnostics} />
+      </main>
     </div>
   );
 };

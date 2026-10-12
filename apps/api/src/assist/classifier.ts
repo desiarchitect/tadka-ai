@@ -1,5 +1,5 @@
-// The LLM intent classifier. One structured call, no tools, no loop. The model is passed
-// in, so tests use a fake model and the evaluator uses the real one.
+// The LLM intent classifier. One structured call, no tools, no loop. The model comes in as a
+// ModelPort, so tests use a fake model and the evaluator uses the real one, and this file never names a provider.
 //
 // Every call ends in exactly one outcome. A failure is never reported as intent "other":
 //   ok              the model returned a schema-valid intent
@@ -8,7 +8,8 @@
 //   provider_error  timeout, auth, quota, network or any other API failure
 // A model that answers in prose ("I can't help with that") is counted as invalid_output:
 // from the SDK's side that is indistinguishable from any other text that is not the schema.
-import { generateText, NoObjectGeneratedError, Output, type LanguageModel } from 'ai';
+import { generateText, NoObjectGeneratedError, Output } from 'ai';
+import type { ModelPort } from '../llm/types.js';
 import { IntentOutput, type Intent } from './intent.js';
 
 export const MAX_OUTPUT_TOKENS = 100; // the answer is one short JSON field; reasoning is off
@@ -32,18 +33,18 @@ export type ClassifyResult =
 const usageOf = (u: { inputTokens?: number; outputTokens?: number } | undefined): Usage | undefined =>
   u ? { inputTokens: u.inputTokens ?? 0, outputTokens: u.outputTokens ?? 0 } : undefined;
 
-export async function classifyIntent(model: LanguageModel, text: string): Promise<ClassifyResult> {
+export async function classifyIntent({ model, providerOptions }: ModelPort, text: string): Promise<ClassifyResult> {
   try {
     const result = await generateText({
       model,
       output: Output.object({ schema: IntentOutput, name: 'intent' }),
       system: SYSTEM_PROMPT,
       prompt: text,
-      temperature: 0, // accepted only because reasoningEffort is 'none'
+      temperature: 0, // accepted only because the adapter sets reasoningEffort 'none'
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       maxRetries: 0, // a retry would spend budget silently; the caller sees the failure
-      // store: false: the Responses API keeps responses by default.
-      providerOptions: { azure: { store: false, reasoningEffort: 'none' } },
+      // Chosen by the provider adapter in src/llm (no storage, no reasoning tokens). Opaque here.
+      providerOptions,
     });
     const usage = usageOf(result.usage);
     if (result.finishReason === 'content-filter') return { outcome: 'refusal', usage };

@@ -21,9 +21,9 @@ const model = scripted([]);
 const prompts: unknown[] = [];
 const use = (steps: Step[]) => { const inner = scripted(steps); model.doGenerate = (opts) => { prompts.push(opts.prompt); return inner.doGenerate(opts); }; };
 const assistant: AssistantDeps = {
-  model, audit: memoryAudit(),
+  model, providerOptions: {}, audit: memoryAudit(),
   ledger: new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'conv-')), 'usage.json'), 5),
-  config: { ...DEFAULT_LOOP, pricedModel: 'gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25 },
+  config: { ...DEFAULT_LOOP, priceKey: 'azure:gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25 },
 };
 const clarify = (reason: keyof typeof CLARIFY): [string, unknown] => ['final_answer', { kind: 'clarify', resultIds: [], clarifyReason: reason }];
 const lastPrompt = () => JSON.stringify(prompts.at(-1));
@@ -220,7 +220,7 @@ describe('logs', () => {
   });
 });
 
-describe('without AZURE_* settings', () => {
+describe('without a configured provider', () => {
   it('conversations can be listed, but a message is 503 assistant_not_configured', async () => {
     const plain = await startStack();
     const t = (await plain.login('rahul@tadka.test')).accessToken;

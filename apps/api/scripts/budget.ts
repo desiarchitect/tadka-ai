@@ -4,8 +4,8 @@
 //       Lists requests that were sent but never settled. The provider may have processed
 //       them, so they stay held at their full estimate until you settle them.
 //   pnpm budget:settle <id> --tokens <input>/<output>
-//       Settles one at the real usage. Look it up first in Microsoft Foundry
-//       (your deployment's Metrics, or Cost Management) for the time it was created.
+//       Settles one at the real usage. Look it up first with your provider
+//       (Foundry deployment Metrics or Cost Management, or the OpenAI usage page) for the time it was created.
 //   pnpm budget:settle <id> --estimate
 //       Settles it at the estimate already held (use when you can't find the real figure).
 //

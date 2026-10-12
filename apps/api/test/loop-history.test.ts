@@ -31,10 +31,10 @@ const services = {
 function deps(steps: Step[], prefs?: { diet?: 'vegetarian' }) {
   const model = scripted(steps);
   const d: LoopDeps = {
-    model,
+    model, providerOptions: {},
     executor: { ...(services as object as ExecutorServices), prefs, audit: memoryAudit(), log: () => {} },
     ledger: new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'hist-')), 'u.json'), 5),
-    config: { ...DEFAULT_LOOP, pricedModel: 'gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25 },
+    config: { ...DEFAULT_LOOP, priceKey: 'azure:gpt-5.4-mini', maxOutputTokens: 400, turnBudgetUsd: 0.05, estimateMargin: 1.25 },
     log: () => {},
   };
   return { d, model };

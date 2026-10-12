@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
 import { IdentityService } from './identity/service.js';
 import type { LanguageModel } from 'ai';
+import type { ProviderOptions } from './llm/types.js';
 import { runTurn, type LoopConfig, type TurnOptions } from './assist/agent-loop.js';
 import type { BudgetLedger } from './assist/budget.js';
 import { rulesClassifier, type IntentClassifier } from './assist/classifiers.js';
@@ -18,7 +19,8 @@ import type { Db } from './shared/db.js';
 import { UnauthorizedError } from './shared/errors.js';
 import type { Principal } from './shared/principal.js';
 
-export type AssistantDeps = { model: LanguageModel; ledger: BudgetLedger; config: LoopConfig; audit: SecurityAudit; historyBudgetBytes?: number };
+// `providerOptions` and `config.priceKey` come from the ModelHandle built in src/llm.
+export type AssistantDeps = { model: LanguageModel; providerOptions: ProviderOptions; ledger: BudgetLedger; config: LoopConfig; audit: SecurityAudit; historyBudgetBytes?: number };
 // `logStream`: send the API's logs here instead (tests use it to check what is logged).
 export type AppDeps = { db: Db; keys: SigningKeys; provider: PaymentProvider; classify?: IntentClassifier; assistant?: AssistantDeps; logStream?: { write(line: string): void } };
 
@@ -67,7 +69,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   const a = deps.assistant;
   const chat = a && ((p: Principal, text: string, opts: TurnOptions & { prefs?: Prefs } = {}) => runTurn({
-    model: a.model, ledger: a.ledger, config: a.config,
+    model: a.model, providerOptions: a.providerOptions, ledger: a.ledger, config: a.config,
     executor: { orders, restaurants, prefs: opts.prefs, audit: a.audit, log: (line) => app.log.info(line) },
     log: (e) => app.log.warn(e),
   }, p, text, opts));

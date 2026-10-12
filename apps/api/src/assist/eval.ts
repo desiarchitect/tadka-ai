@@ -1,7 +1,7 @@
 // The evaluator: run one classifier over the frozen message set and summarise honestly.
 // A failure (refusal, invalid output, provider error, budget stop) is never counted as a
 // correct answer and never hidden inside "other". Accuracy always divides by the full set.
-import { BudgetLedger, type PricedModel } from './budget.js';
+import { BudgetLedger } from './budget.js';
 import { MAX_OUTPUT_TOKENS, type ClassifyResult } from './classifier.js';
 import { worstCaseInputTokens } from './classifiers.js';
 import type { Intent } from './intent.js';
@@ -20,24 +20,25 @@ export type EvalRow = {
 // the next request could cross a limit, the run stops. It never retries.
 export class EvalBudget {
   private runSpent = 0;
-  constructor(private readonly runCapUsd: number, private readonly priced: PricedModel, private readonly ledger?: BudgetLedger) {}
+  // `priceKey` is provider:model, for example azure:gpt-5.4-mini (ModelHandle.priceKey).
+  constructor(private readonly runCapUsd: number, private readonly priceKey: string, private readonly ledger?: BudgetLedger) {}
 
   worstCase(text: string): number {
-    return BudgetLedger.cost(this.priced, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
+    return BudgetLedger.cost(this.priceKey, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
   }
 
   /** Throws if sending this request could exceed the run cap or the ledger cap. */
   beforeSend(text: string): void {
     const worst = this.worstCase(text);
     if (this.runSpent + worst > this.runCapUsd) throw new Error(`run budget: spent $${this.runSpent.toFixed(6)} + worst case $${worst.toFixed(6)} exceeds $${this.runCapUsd}`);
-    this.ledger?.assertAffordable(this.priced, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
+    this.ledger?.assertAffordable(this.priceKey, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
   }
 
   /** Record actual usage after a response. Returns the cost. */
   afterResponse(inputTokens: number, outputTokens: number): number {
-    const cost = BudgetLedger.cost(this.priced, inputTokens, outputTokens);
+    const cost = BudgetLedger.cost(this.priceKey, inputTokens, outputTokens);
     this.runSpent += cost;
-    this.ledger?.record(this.priced, inputTokens, outputTokens);
+    this.ledger?.record(this.priceKey, inputTokens, outputTokens);
     return cost;
   }
 

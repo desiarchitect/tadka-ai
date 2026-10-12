@@ -66,7 +66,7 @@ describe('the budget guard stops BEFORE sending', () => {
 
   it('a run cap smaller than one worst-case request sends nothing', async () => {
     let calls = 0;
-    const budget = new EvalBudget(0.000001, 'gpt-5.4-mini');
+    const budget = new EvalBudget(0.000001, 'azure:gpt-5.4-mini');
     const rows = await runEval(msgs, async () => { calls++; return ok('other'); }, budget);
     expect(calls).toBe(0);
     expect(rows.every((r) => r.outcome === 'budget_stop')).toBe(true);
@@ -74,10 +74,10 @@ describe('the budget guard stops BEFORE sending', () => {
   });
 
   it('stops part-way when actual spend plus the next worst case would cross the cap', async () => {
-    const worst = new EvalBudget(1, 'gpt-5.4-mini').worstCase(msgs[0]!.text);
+    const worst = new EvalBudget(1, 'azure:gpt-5.4-mini').worstCase(msgs[0]!.text);
     // Room for the first request's worst case, then actual spend of 100 in / 5 out is tiny,
     // so make the cap just over 2 worst cases to prove the check uses spend so far.
-    const budget = new EvalBudget(worst * 2.5, 'gpt-5.4-mini');
+    const budget = new EvalBudget(worst * 2.5, 'azure:gpt-5.4-mini');
     let calls = 0;
     const rows = await runEval(msgs, async () => { calls++; return { outcome: 'ok', intent: 'other', usage: { inputTokens: 1_000_000 / 4, outputTokens: 0 } }; }, budget);
     // each response "costs" 0.25M input tokens = $0.1875, far above the cap: the second request is refused
@@ -88,14 +88,14 @@ describe('the budget guard stops BEFORE sending', () => {
   it('never retries after a stop, and the shared ledger cap also stops the run', async () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'ep1-')), 'usage.json'), 0.000001);
     let calls = 0;
-    const rows = await runEval(msgs, async () => { calls++; return ok('other'); }, new EvalBudget(100, 'gpt-5.4-mini', ledger));
+    const rows = await runEval(msgs, async () => { calls++; return ok('other'); }, new EvalBudget(100, 'azure:gpt-5.4-mini', ledger));
     expect(calls).toBe(0);
     expect(rows.length).toBe(10);
   });
 
   it('records actual usage in the ledger', async () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'ep1-')), 'usage.json'), 5);
-    await runEval(msgs.slice(0, 2), async () => ok('other'), new EvalBudget(1, 'gpt-5.4-mini', ledger));
+    await runEval(msgs.slice(0, 2), async () => ok('other'), new EvalBudget(1, 'azure:gpt-5.4-mini', ledger));
     expect(ledger.read().calls.length).toBe(2);
     expect(ledger.spent()).toBeGreaterThan(0);
   });
@@ -108,8 +108,9 @@ describe('the worst-case input bound', () => {
     expect(worstCaseInputTokens(devanagari) - worstCaseInputTokens(latin)).toBe(60);
   });
 
-  it('fails closed for a model with no configured price', () => {
+  it('fails closed for a provider and model with no configured price, even if another provider has one', () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'ep1-')), 'usage.json'), 5);
-    expect(() => ledger.assertAffordable('gpt-unknown' as never, 100, 100)).toThrow(/no price configured/);
+    expect(() => ledger.assertAffordable('azure:gpt-unknown', 100, 100)).toThrow(/no price configured/);
+    expect(() => ledger.assertAffordable('openai:gpt-5.4-mini', 100, 100)).toThrow(/no price configured/);
   });
 });

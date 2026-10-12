@@ -10,8 +10,10 @@
 import { randomUUID } from 'node:crypto';
 import { generateText, jsonSchema, tool, ToolChoiceViolationError, type LanguageModel, type ModelMessage } from 'ai';
 import { z } from 'zod';
+import { isPriced } from '../llm/pricing.js';
+import type { ProviderOptions } from '../llm/types.js';
 import type { Principal } from '../shared/principal.js';
-import { BudgetLedger, isPricedModel } from './budget.js';
+import { BudgetLedger } from './budget.js';
 import { REQUEST_OVERHEAD_TOKENS } from './classifiers.js';
 import { pairProblem } from './history.js';
 import { CLARIFY, FALLBACK, renderAll, type ClarifyReason } from './templates.js';
@@ -25,7 +27,7 @@ export type TurnResult = { answer: string; stopReason: StopReason; steps: { tool
 // EP3: earlier turns to send with this one, and this turn's number (result ids become t3r1).
 export type TurnOptions = { history?: ModelMessage[]; turnNo?: number };
 export type LoopConfig = {
-  pricedModel: string; // the model the deployment is priced as; unknown = nothing is sent
+  priceKey: string; // provider:model, from the ModelHandle; a pair with no price means nothing is sent
   maxOutputTokens: number;
   turnBudgetUsd: number;
   estimateMargin: number;
@@ -35,10 +37,11 @@ export type LoopConfig = {
   deadlineMs: number;
   maxPayloadBytes: number;
 };
-export const DEFAULT_LOOP: Omit<LoopConfig, 'pricedModel' | 'maxOutputTokens' | 'turnBudgetUsd' | 'estimateMargin'> =
+export const DEFAULT_LOOP: Omit<LoopConfig, 'priceKey' | 'maxOutputTokens' | 'turnBudgetUsd' | 'estimateMargin'> =
   { maxSteps: 6, maxToolCalls: 8, parallel: 3, deadlineMs: 20_000, maxPayloadBytes: 32 * 1024 };
 export type LoopEvent = { event: 'estimator_violation'; estimateTokens: number; inputTokens: number; outputTokens: number; payloadBytes: number };
-export type LoopDeps = { model: LanguageModel; executor: ExecutorDeps; ledger: BudgetLedger; config: LoopConfig; log: (e: LoopEvent) => void };
+// `providerOptions` come from the provider adapter in src/llm and are passed through untouched.
+export type LoopDeps = { model: LanguageModel; providerOptions: ProviderOptions; executor: ExecutorDeps; ledger: BudgetLedger; config: LoopConfig; log: (e: LoopEvent) => void };
 
 export const SYSTEM_PROMPT = `You are Tadka's order assistant for a logged-in customer.
 You never write text for the customer: every reply is a tool call.
@@ -72,7 +75,7 @@ export function estimateRequest(messages: ModelMessage[], c: LoopConfig) {
   const payload = JSON.stringify({ system: SYSTEM_PROMPT, tools: Object.entries(TOOL_SET).map(([n, t]) => ({ n, d: t.description, s: (t.inputSchema as { jsonSchema: unknown }).jsonSchema })), messages });
   const payloadBytes = Buffer.byteLength(payload, 'utf8');
   const inputTokens = Math.ceil((payloadBytes + PER_MESSAGE_TOKENS * (messages.length + 1) + REQUEST_OVERHEAD_TOKENS) * c.estimateMargin);
-  const usd = isPricedModel(c.pricedModel) ? BudgetLedger.cost(c.pricedModel, inputTokens, c.maxOutputTokens) : Number.POSITIVE_INFINITY;
+  const usd = isPriced(c.priceKey) ? BudgetLedger.cost(c.priceKey, inputTokens, c.maxOutputTokens) : Number.POSITIVE_INFINITY;
   return { payloadBytes, inputTokens, usd };
 }
 
@@ -100,7 +103,7 @@ export async function runTurn(deps: LoopDeps, p: Principal, text: string, opts: 
   const stop = (stopReason: StopReason, answer = FALLBACK): TurnResult => ({ answer, stopReason, steps, requests, estimatedUsd, chargedUsd, turnMessages: messages.slice(history.length) });
 
   try {
-    if (!isPricedModel(c.pricedModel) || !(c.maxOutputTokens > 0)) return stop('budget'); // fail closed
+    if (!isPriced(c.priceKey) || !(c.maxOutputTokens > 0)) return stop('budget'); // fail closed
     for (let step = 0; step < c.maxSteps; step++) {
       // 0. Never send a history the provider would reject: every call needs its result.
       if (pairProblem(messages)) return stop('invalid_history');
@@ -113,7 +116,7 @@ export async function runTurn(deps: LoopDeps, p: Principal, text: string, opts: 
       // 2. Money: the turn cap, then an atomic reservation in the shared ledger.
       if (remaining() <= 0) return stop('deadline');
       if (chargedUsd + est.usd > c.turnBudgetUsd) return stop('budget');
-      const reservation = deps.ledger.reserve(c.pricedModel, est.usd, turnId);
+      const reservation = deps.ledger.reserve(c.priceKey, est.usd, turnId);
       if (!reservation) return stop('budget');
       estimatedUsd += est.usd;
 
@@ -124,7 +127,7 @@ export async function runTurn(deps: LoopDeps, p: Principal, text: string, opts: 
         r = await beforeDeadline(generateText({
           model: deps.model, system: SYSTEM_PROMPT, messages, tools: TOOL_SET, toolChoice: 'required',
           maxOutputTokens: c.maxOutputTokens, temperature: 0, maxRetries: 0, abortSignal: abort.signal,
-          providerOptions: { azure: { store: false, reasoningEffort: 'none' } },
+          providerOptions: deps.providerOptions,
         }));
       } catch (err) {
         // No usage comes back with an error: charge the estimate.

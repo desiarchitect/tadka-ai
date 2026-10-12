@@ -1,17 +1,10 @@
 // Hard spending cap for live probe calls. A provider-side alert only notifies; this
 // refuses the call BEFORE it is sent if the worst case could cross the cap.
-// Prices: Microsoft Foundry, Global Standard deployment, USD per 1M tokens, from the Azure
-// Retail Prices API as shown on azurespeed.com (checked 2026-10-11). Data Zone deployments cost
-// about 10-20% more. Update them if the price changes.
+// Prices are per provider and model (src/llm/pricing.ts). A pair with no price is refused,
+// so switching provider can never silently reuse another provider's numbers.
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
-
-export const PRICES = {
-  'gpt-5.4-mini': { inputPerM: 0.75, outputPerM: 4.5 },
-  'gpt-5.4-nano': { inputPerM: 0.2, outputPerM: 1.25 },
-} as const;
-export type PricedModel = keyof typeof PRICES;
-export const isPricedModel = (m: string): m is PricedModel => Object.hasOwn(PRICES, m);
+import { PRICES, isPriced } from '../llm/pricing.js';
 
 type Call = { at: string; model: string; inputTokens: number; outputTokens: number; costUsd: number; reservationId?: string; chargedAt?: 'usage' | 'estimate' | 'operator' };
 // A reservation holds a request's estimated cost against the cap until it is settled.
@@ -45,22 +38,24 @@ export class BudgetLedger {
     return l.calls.reduce((s, c) => s + c.costUsd, 0) + open.reduce((s, r) => s + r.estimateUsd, 0);
   }
 
-  static cost(model: PricedModel, inputTokens: number, outputTokens: number): number {
-    const p = PRICES[model];
+  // `model` is a price key such as "azure:gpt-5.4-mini" (ModelHandle.priceKey).
+  static cost(model: string, inputTokens: number, outputTokens: number): number {
+    if (!isPriced(model)) throw new Error(`budget: no price configured for ${model}`);
+    const p = PRICES[model]!;
     return (inputTokens * p.inputPerM + outputTokens * p.outputPerM) / 1_000_000;
   }
 
   // Worst case: the caller's estimate of input tokens, plus the full output cap, priced
   // separately. An unpriced model throws here, so the guard fails closed.
-  assertAffordable(model: PricedModel, inputTokensEstimate: number, maxOutputTokens: number): number {
-    if (!isPricedModel(model)) throw new Error(`budget: no price configured for ${model}`);
+  assertAffordable(model: string, inputTokensEstimate: number, maxOutputTokens: number): number {
+    if (!isPriced(model)) throw new Error(`budget: no price configured for ${model}`);
     const worst = BudgetLedger.cost(model, inputTokensEstimate, maxOutputTokens);
     const committed = this.committed();
     if (committed + worst > this.budgetUsd) throw new Error(`budget: committed $${committed.toFixed(6)} + worst case $${worst.toFixed(6)} exceeds cap $${this.budgetUsd}`);
     return worst;
   }
 
-  record(model: PricedModel, inputTokens: number, outputTokens: number): number {
+  record(model: string, inputTokens: number, outputTokens: number): number {
     return this.locked((l) => {
       const costUsd = BudgetLedger.cost(model, inputTokens, outputTokens);
       l.calls.push({ at: new Date().toISOString(), model, inputTokens, outputTokens, costUsd });
@@ -71,7 +66,7 @@ export class BudgetLedger {
   // One locked compare-and-reserve. Returns null when the estimate doesn't fit, so two
   // concurrent turns can't both spend the same remaining allowance.
   reserve(model: string, estimateUsd: number, turnId: string): string | null {
-    if (!isPricedModel(model)) throw new Error(`budget: no price configured for ${model}`);
+    if (!isPriced(model)) throw new Error(`budget: no price configured for ${model}`);
     return this.locked((l) => {
       if (this.committed(l) + estimateUsd > this.budgetUsd) return null;
       const id = randomUUID();
@@ -93,7 +88,7 @@ export class BudgetLedger {
   settle(id: string, charge: { inputTokens: number; outputTokens: number } | 'estimate', by: 'usage' | 'estimate' | 'operator'): number {
     return this.locked((l) => {
       const r = this.transition(l, id, 'sent', 'settled');
-      const model = r.model as PricedModel;
+      const model = r.model;
       const costUsd = charge === 'estimate' ? r.estimateUsd : BudgetLedger.cost(model, charge.inputTokens, charge.outputTokens);
       const tokens = charge === 'estimate' ? { inputTokens: 0, outputTokens: 0 } : charge;
       l.calls.push({ at: new Date().toISOString(), model, ...tokens, costUsd, reservationId: id, chargedAt: by });

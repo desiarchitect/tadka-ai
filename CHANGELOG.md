@@ -31,6 +31,9 @@ Episode 2: typed tool calling with server-side identity. Starts from `ep01-struc
 - The boundary test covers `assist/tools` and the loop, checks that `src/` never imports `demo/`, and checks that no tool schema has a user field.
 - The runbook is now for this branch; sections after section 6 moved down by one number.
 
+### Fixed
+- The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
+
 ### Verified
 - Typecheck and 140 of 140 tests on Node 24 and Node 26.
 - On a clean clone: install, migrate, seed, `pnpm dev`; the naive-tool demo; `POST /assist/chat` returning 503 without a model, in bash and PowerShell; the budget commands.

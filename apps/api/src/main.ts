@@ -1,31 +1,40 @@
-import { createModelHandle, formatMeta, type ModelPort } from './llm/index.js';
-import { demoModel } from './assist/demo-model.js';
+import { LlmConfigError, formatMeta, type ModelPort } from './llm/index.js';
 import { buildApp } from './app.js';
+import { selectProviderMode } from './assist/provider-mode.js';
 import { loadSigningKeys } from './identity/access-tokens.js';
 import { HttpPaymentProvider } from './payments/provider.js';
-import { loadConfig } from './shared/config.js';
+import { loadConfig, type Config } from './shared/config.js';
 import { createDb } from './shared/db.js';
 import { createShutdown, installSignalHandlers, telemetryStage } from './shutdown.js';
 
-const config = loadConfig();
+// A configuration mistake is a message and exit code 1, never a stack trace.
+const refuse = (message: string): never => { console.error(`Startup refused: ${message}`); process.exit(1); };
+
+let config: Config;
+try { config = loadConfig(); } catch (e) { config = refuse((e as Error).message); }
 if (!config.JWT_PRIVATE_JWK) console.warn('JWT_PRIVATE_JWK unset: using a fresh dev signing key; tokens end when the process restarts.');
-const { db, pool } = createDb(config.DATABASE_URL);
+
+let mode: ReturnType<typeof selectProviderMode>;
+try {
+  mode = selectProviderMode({ demo: config.DEMO_MODE });
+} catch (e) {
+  if (!(e instanceof LlmConfigError)) throw e;
+  mode = refuse(`${e.message}. Fill in the missing value in .env, or leave LLM_PROVIDER empty (set DEMO_MODE=1 for simulated answers).`);
+}
 
 let model: ModelPort | undefined;
-if (config.DEMO_MODE) {
-  // Explicit opt-in. Every triage response is marked simulated; a real provider setting is ignored.
-  console.warn('DEMO_MODE=1: /assist/triage returns SIMULATED answers (modelId demo-mock). No real model is called.');
-  model = demoModel();
+if (mode.mode === 'demo') {
+  console.warn('DEMO_MODE=1: /assist/triage returns SIMULATED answers (modelId demo-mock). No real model is called and provider settings are not read.');
+  model = mode.model;
+} else if (mode.mode === 'live') {
+  for (const w of mode.warnings) console.warn(`llm: ${w}`);
+  console.log(`llm: ${formatMeta(mode.handle.meta)}`);
+  model = mode.handle;
 } else {
-  const llmSetup = createModelHandle();
-  if (llmSetup.status === 'ready') {
-    for (const w of llmSetup.warnings) console.warn(`llm: ${w}`);
-    console.log(`llm: ${formatMeta(llmSetup.handle.meta)}`);
-    model = llmSetup.handle;
-  } else {
-    console.warn(`llm is off: ${llmSetup.reason}. /assist/triage answers 503 provider_not_configured (set DEMO_MODE=1 for simulated answers).`);
-  }
+  console.warn(`llm is off: ${mode.reason}. /assist/triage answers 503 provider_not_configured (set DEMO_MODE=1 for simulated answers).`);
 }
+
+const { db, pool } = createDb(config.DATABASE_URL);
 
 const app = buildApp({
   db,

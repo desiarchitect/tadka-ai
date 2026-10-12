@@ -175,7 +175,7 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
 | `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
-| `LLM_PROVIDER` | `azure` | Only for `--live` | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). See section 9 |
+| `LLM_PROVIDER` | empty | Only when you have credentials | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). **Leave it empty until you have credentials**: choosing a provider without its credentials stops the API at startup. See "What starts, and what refuses to start" below and section 9 |
 | `LLM_MODEL` | `gpt-5.4-mini` | No | The model the budget prices and the evaluations record. Not the Azure deployment name |
 | `AZURE_RESOURCE_NAME` | empty | With `LLM_PROVIDER=azure` | The name of your Azure resource. See section 9 |
 | `AZURE_API_KEY` | empty | With `LLM_PROVIDER=azure` | KEY 1 of that resource. See section 9 |
@@ -188,13 +188,25 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `CORS_ORIGIN` | empty | No | One browser origin allowed to call the API. Empty = `http://localhost:5173` and `:4173` |
 | `SHUTDOWN_DEADLINE_MS` | `8000` | No (ops/test knob) | Overall time `Ctrl+C` / SIGTERM may take before the process is forced to exit |
 
-Everything except the provider credentials already works as copied. You can run the whole branch, including all tests and
-the dry-run probe, without filling anything in.
+The template as copied starts the whole branch: the API, the fake provider and the page, and all tests and the dry-run probe run.
+Without a provider the assistant is simply off (see the next paragraphs); nothing else needs filling in.
 
 **The browser assistant needs one of two things.** Either provider credentials (section 9), or `DEMO_MODE=1` in `.env`.
 With neither, `POST /assist/triage` answers `503 provider_not_configured`: the server never pretends to be a model.
 With `DEMO_MODE=1` every answer is marked `simulated: true`, carries `modelId: "demo-mock"`, and the page shows a SIMULATED badge.
-If you add real credentials, set `DEMO_MODE=0` (a real provider setting is ignored while demo mode is on).
+If you add real credentials, set `DEMO_MODE=0` (provider settings are not read at all while demo mode is on).
+
+**What starts, and what refuses to start.** The API decides once, at startup, from `DEMO_MODE` and `LLM_PROVIDER`:
+
+| `DEMO_MODE` | `LLM_PROVIDER` and credentials | Result |
+|---|---|---|
+| `1` | anything, even half filled | **Starts.** Simulated answers. Provider settings are not read and no provider is ever contacted |
+| `0` or empty | empty (the template) and no `AZURE_*` / `OPENAI_*` | **Starts, model off.** Triage is `503 provider_not_configured` |
+| `0` or empty | `azure` or `openai` with its credentials complete | **Starts, live model.** The log names the deployment |
+| `0` or empty | `azure` or `openai` **without** its credentials, or an unknown value, or a deployment not named like a GPT model | **Refuses to start**, exit code 1, one line such as `Startup refused: LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY`. It never prints a credential value |
+| any other value than `1`, `0` or empty | | **Refuses to start** (`DEMO_MODE must be "1" or "0" (or empty)`) |
+
+A setting that is present but empty (`TRIAGE_RATE_LIMIT_PER_MIN=`) takes its default; a wrong value (`TRIAGE_TIMEOUT_MS=soon`) refuses to start and names the setting.
 
 Do not set `PORT` in `.env`: the API (3000) and the fake provider (4010) both read it and would collide.
 Never paste your key into a chat, an issue or a commit.
@@ -614,7 +626,7 @@ A good run prints JSON with `"mode": "live"`, your `deployment`, a typed `output
 
 | Message or symptom | Likely cause | Fix |
 |---|---|---|
-| `LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | A value is empty or `.env` is not in the repository root | Fill both, save, run again from the repository root |
+| `Startup refused: LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | You chose a provider but a credential is empty, or `.env` is not in the repository root | Fill both and run again from the repository root; or empty `LLM_PROVIDER` to run without a model (add `DEMO_MODE=1` for simulated answers) |
 | `AZURE_DEPLOYMENT "..." is not named like a GPT model` | The deployment has a name the AI SDK cannot recognise | Create or choose a deployment named like `gpt-5.4-mini` |
 | `Nothing was sent. budget: no price configured for ...` | This provider and model have no price row | Add one in `apps/api/src/llm/pricing.ts` (section 9, Switch provider) |
 | 401 (access denied) | Wrong or regenerated key | Copy KEY 1 again |

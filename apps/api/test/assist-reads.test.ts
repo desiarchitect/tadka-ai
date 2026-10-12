@@ -66,7 +66,7 @@ describe('denial classification (internal only)', () => {
     const [a, b] = [await get(amanOrderId), await get(INVENTED)];
     expect(a.statusCode).toBe(404);
     expect(a.body).toBe(b.body);
-    const drop = (h: Record<string, unknown>) => { const { date, ...rest } = h; return rest; };
+    const drop = (h: Record<string, unknown>) => { const { date, 'x-request-id': _reqId, ...rest } = h; return rest; };
     expect(drop(a.headers)).toEqual(drop(b.headers));
   });
 });

@@ -191,8 +191,8 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `EVAL_BUDGET_USD` | `0.5` | No | Spending cap for one `pnpm eval:intent --live` run (section 6) |
 | `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe. It does **not** limit the HTTP route (see section 10) |
 | `DEMO_MODE` | `0` | No | `1`: `POST /assist/triage` returns SIMULATED answers and calls no model. `0` or empty: off. Anything else: the API refuses to start |
-| `TRIAGE_RATE_LIMIT_PER_MIN` | `10` | No | Requests per minute per signed-in user on `POST /assist/triage` |
-| `TRIAGE_TIMEOUT_MS` | `15000` | No | Longest the API waits for the model on one request |
+| `TRIAGE_RATE_LIMIT_PER_MIN` | `10` | No | Requests per minute per signed-in user, **per route**, on `POST /assist/triage` and on `POST /assist/intent` (each has its own quota). The name is historical; it covers both |
+| `TRIAGE_TIMEOUT_MS` | `15000` | No | Longest the API waits for the model on one request, on both routes. The call is aborted at that point |
 | `CORS_ORIGIN` | empty | No | One browser origin allowed to call the API. Empty = `http://localhost:5173` and `:4173` |
 | `SHUTDOWN_DEADLINE_MS` | `8000` | No (ops/test knob) | Overall time `Ctrl+C` / SIGTERM may take before the process is forced to exit |
 
@@ -460,7 +460,28 @@ When `pnpm dev` starts it prints one line:
 - `POST /assist/intent classifier: keyword rules: no LLM settings (set LLM_PROVIDER and its credentials)`: no key needed. The route uses the keyword rules.
 - `POST /assist/intent classifier: LLM (Foundry deployment gpt-5.4-mini, model gpt-5.4-mini)` or `LLM (OpenAI model gpt-5.4-mini)`: the provider in `LLM_PROVIDER` is configured in `.env` (section 10). The route uses that model, behind the spending guard.
 
-Every response says which one answered, in `"classifier": "rules"` or `"classifier": "llm"`.
+- `POST /assist/intent classifier: keyword rules (DEMO_MODE=1: no provider is used)`: demo mode. The provider settings are not read and the route never contacts a provider, even if credentials are in `.env`.
+
+Every response says which one answered, in `"classifier": "rules"` or `"classifier": "llm"`, and `"simulated": true` only in demo mode (where the keyword rules answer and nothing came from a model).
+
+### What `/assist/intent` does when something is wrong
+
+It is guarded exactly like `/assist/triage` (one shared guard, `src/assist/guard.ts`):
+
+| Situation | Answer |
+|---|---|
+| No token | `401 missing_token` or `invalid_token` |
+| Owner or admin token | `403 customers_only` |
+| A body with another field, an empty text, or more than 500 characters | `400 invalid_request` |
+| More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute from one user | `429 rate_limited` with `Retry-After`. Requests rejected above (401, 403) never use up anyone's quota; each user has their own |
+| The provider does not answer within `TRIAGE_TIMEOUT_MS` | `502 assistant_unavailable`. The call is aborted, so nothing keeps waiting |
+| Key rejected, rate limited by the provider, provider down, network failure, or the spending guard refused | `502 assistant_unavailable`. There is no retry |
+| Refusal, or output that is not a valid intent | `200` with `outcome: "refusal"` or `"invalid_output"` and the safe fallback; never a made-up intent and never `other` |
+
+The client only ever sees `assistant_unavailable` for a failed call. **The reason is in the server log**, as a line `assist/intent: no intent was produced` with
+`outcome`, `reason` (`provider_timeout`, `provider_auth`, `provider_rate_limited`, `provider_unavailable`, `budget`, `aborted`, `content_filter`, `no_object`...),
+the provider's status number and its error code and request id when they look like identifiers. The log never holds the customer's message, the model's output,
+provider text, keys or the resource name.
 
 ### Demo 1: no LLM at all
 
@@ -665,7 +686,8 @@ The error text is always ours. Provider messages, keys, resource names and the c
 
 What the limits are, and are not:
 - The rate limit is basic abuse protection. It lives in the API process's memory, so it resets on restart and is not shared between several instances.
-- **The `M0_BUDGET_USD` ledger does not apply to this route.** It guards only `pnpm probe:llm -- --live`. The HTTP route is bounded by the rate limit, the 500-character input, the 400-token output cap and `maxRetries: 0`; there is no hard money cap.
+- **The `M0_BUDGET_USD` ledger does not apply to `/assist/triage`.** It guards `pnpm probe:llm -- --live`, `pnpm eval:intent --live` and the LLM classifier behind `/assist/intent` (section 6). Triage is bounded by the rate limit, the 500-character input, the 400-token output cap and `maxRetries: 0`; there is no hard money cap on it.
+- **The ledger can under-count.** It adds a call's cost only when the provider reports usage. A call that times out or fails without a usage report is not added, so the ledger is not a hard cap; the provider's own spending limit is.
 - The timeout aborts the call at the AI SDK / `fetch` boundary (proved against a stand-in for the network). Whether a live Foundry request is cancelled on the provider's side has not been checked.
 
 Stopping the servers is bounded: the API and the fake provider stop accepting requests, close the database (API only),
@@ -796,7 +818,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal, then check with the list at the end of section 2 |
 | `pnpm dev` says `classifier: keyword rules` but you expected the LLM | The provider settings are empty in `.env` (the log line says what is missing), or `.env` is not in the repository root | Set `LLM_PROVIDER` and its credentials, then restart `pnpm dev` (section 4) |
 | `pnpm dev` exits with `LLM_PROVIDER=... needs ...` or `Both Azure and OpenAI settings are present` | The provider choice is incomplete or ambiguous | Fix `.env` as the message says, or clear the LLM settings to use the keyword rules |
-| `POST /assist/intent` returns `{"error":"assistant_unavailable"} [502]` | The model call failed: wrong key or deployment name, quota, network, or the spending guard refused | Check the provider settings in `.env`; check `.m0-usage.json` against `M0_BUDGET_USD`; try `pnpm probe:llm -- --live` |
+| `POST /assist/intent` returns `{"error":"assistant_unavailable"} [502]` | The model call failed: wrong key or deployment name, quota, a timeout, network, or the spending guard refused | Read the server log line `assist/intent: no intent was produced`: its `reason` and `providerStatus` say which. Then check the provider settings in `.env`, `.m0-usage.json` against `M0_BUDGET_USD`, and try `pnpm probe:llm -- --live` |
 | `pnpm eval:intent --live` ends with `budget_stop` rows | A run or ledger cap would have been crossed, so the remaining requests were not sent | Raise `EVAL_BUDGET_USD` or `M0_BUDGET_USD` on purpose, or delete nothing and read the totals in the output |
 | `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24 or v26; install Node 24 (section 2) |
 | `corepack` is not recognized | Node 25 and later no longer include corepack | Skip corepack and run `npm install -g pnpm@12.11.2` |

@@ -102,7 +102,7 @@ describe('classification failures', () => {
       next = { classifier: 'llm', outcome };
       const res = await ask(await asRahul(), { text: 'hi' });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ outcome, classifier: 'llm', next: FALLBACK });
+      expect(res.json()).toEqual({ outcome, classifier: 'llm', simulated: false, next: FALLBACK });
     }
   });
 
@@ -119,6 +119,6 @@ describe('default classifier', () => {
     const plain = await startStack();
     const { accessToken } = await plain.login('rahul@tadka.test');
     const res = await plain.app.inject({ method: 'POST', url: '/assist/intent', payload: { text: 'Please cancel my order' }, headers: { authorization: `Bearer ${accessToken}` } });
-    expect(res.json()).toMatchObject({ outcome: 'ok', classifier: 'rules', intent: 'cancel_order', next: { action: 'unsupported' } });
+    expect(res.json()).toMatchObject({ outcome: 'ok', classifier: 'rules', simulated: false, intent: 'cancel_order', next: { action: 'unsupported' } });
   });
 });

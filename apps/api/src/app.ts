@@ -109,13 +109,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get('/orders/:id', async (req) => orders.get(await principal(req), parse(idParam, req.params).id));
   app.post('/orders/:id/pay', async (req) => orders.pay(await principal(req), parse(idParam, req.params).id));
 
-  registerAssistRoutes(app, { orders, principal, parse, classify: deps.classify ?? rulesClassifier });
 
   const triageBody = z.object({ message: z.string().trim().min(1).max(500) });
   // The caller's identity and role come from the verified token only, never from the request body.
   // The guard (customer check, per-user limit, provider timeout) is shared: see src/assist/guard.ts.
   app.register(async (scope) => {
     await registerAssistLimiter(scope);
+    // Demo mode must never reach a provider: even if a real classifier was passed in, the keyword rules answer.
+    const classify = deps.demo === true ? rulesClassifier : (deps.classify ?? rulesClassifier);
+    registerAssistRoutes(scope, { orders, principal, parse, classify, demo: deps.demo, rateLimitPerMin: deps.triageRateLimitPerMin, timeoutMs: deps.triageTimeoutMs });
     scope.post('/assist/triage', {
       preHandler: requireCustomer(principal),
       config: perUserLimit(deps.triageRateLimitPerMin),

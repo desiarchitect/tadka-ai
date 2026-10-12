@@ -1,3 +1,5 @@
+> **Historical document.** This review describes baseline `7779ce1` (50 tests) and was written inside this repository's own workflow, so its "ACCEPTED" verdict is not independent evidence for later commits. A later audit (2026-10-12) of `2a47987` found defects this review did not, and they are corrected in the remediation described in `docs/adr/0001-ep0-visual-client-and-cors.md` section 6 and in `CHANGELOG.md`. Test counts and statements below are as they were then.
+
 # EP0 Independent Review: Baseline Audit & Evidence Report
 
 **Project**: Tadka AI Engineering (The Desi Architect)  

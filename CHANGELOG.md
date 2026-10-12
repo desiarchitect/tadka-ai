@@ -104,13 +104,32 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - OpenTelemetry trace ID and request ID propagation on all API responses (`x-trace-id`, `x-request-id`).
 - Authenticated `POST /assist/triage` endpoint for the EP0 vertical slice, guarded by customer token verification and Zod validation.
 - ADR 0001 (`docs/adr/0001-ep0-visual-client-and-cors.md`) and independent review (`docs/reviews/EP0_INDEPENDENT_REVIEW.md`).
-- Tests: 78 (67 API, 8 fake provider, 3 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
+- Tests: 173 (130 API, 13 fake provider, 30 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
+
+### Changed (EP-0 remediation after the independent audit)
+- **No silent mock.** Without a provider, `POST /assist/triage` is `503 provider_not_configured`. `DEMO_MODE=1` (only `1` or `0`; empty is off; anything else refuses to start) returns answers marked `simulated: true` with `modelId: "demo-mock"`, and the client shows a SIMULATED badge. Every response now has an explicit `simulated` boolean. The hard-coded `gpt-5.4-mini` model name in the response is gone: it reports what the provider returned.
+- **Customer only.** Other roles get `403 forbidden_role`. Role and user id come from the verified token.
+- **Per-user rate limit** (`TRIAGE_RATE_LIMIT_PER_MIN`, default 10) with `@fastify/rate-limit` 10.3.0, keyed on the verified user. It is not a spending cap, and the budget ledger still covers only the CLI probe.
+- **Provider errors** are mapped to `502 provider_auth`, `429 provider_rate_limited`, `502 provider_unavailable`, `504 provider_timeout`, `502 provider_bad_output`. Messages are fixed; provider text, keys, resource names and the customer's message are in neither the response nor the log. The log keeps our code, the error class, the provider's status number, and its error code, error type and request id when they look like identifiers. The error handler no longer reuses an AI SDK error's provider status.
+- **Timeouts**: the provider call is aborted after `TRIAGE_TIMEOUT_MS` (15 s); the client stops waiting after 20 s and has a Cancel button.
+- **CORS**: a disallowed origin gets no CORS headers instead of a 500 and an error log.
+- **Client**: responses are validated with zod; one request helper replaces the duplicated fetch code; error wording is the client's own per error code; the demo sign-in and its credentials exist only in a build made with `VITE_DEMO_LOGIN=1` (`pnpm dev` sets it).
+- **CI**: Node 24 and 26 matrix; adds `pnpm build` and the bundle check (`pnpm --filter @tadka/web check:bundle`).
+- Docs: RUNBOOK, README, `.env.example`, `apps/web/.env.example`, ADR 0001 section 6; the earlier in-repo review is marked historical.
+
+### Fixed (EP-0 remediation)
+- **The API and the fake provider did not exit on SIGTERM when tracing was on**, because the bare `SIGTERM` handler in `instrument.ts` replaced Node's default. Both now run one bounded shutdown for SIGTERM and SIGINT: stop the server, close the database (API), flush traces (3 s limit), exit; 8 s overall deadline, forced exit code 1 after it, whichever step hangs (tested for a stuck server close, a stuck stage in each position, and a trace backend that never answers); a repeated signal does not start a second shutdown. A request still running at the deadline is abandoned.
+- The root `pnpm dev` script now uses `--no-bail`, so Ctrl+C no longer makes pnpm kill the API and fake provider before they finish shutting down (Vite exits non-zero on Ctrl+C). SIGTERM sent to a pnpm process is still not forwarded to the apps by pnpm; start the `node` command directly under a process manager or container. RUNBOOK section 9 lists which launch commands give a graceful stop.
+
+### Verified (EP-0 remediation, local, Node 22 only)
+- Typecheck, 173 of 173 tests, the web production build, the bundle check (demo credentials absent without `VITE_DEMO_LOGIN`, present with it) and the dry-run probe, on Node 22, 24 and 26 against a local Postgres 16 without pgvector.
+- Not verified here: the live Foundry call for this commit, CI for this commit, a real browser (CORS included), Jaeger (a successful trace flush through `pnpm dev`), Docker and the pgvector image, clean-machine reproduction.
 
 ### Fixed
 - The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
 
 ### Verified
-- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, build, and 78 of 78 tests.
+- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, build, and 78 of 78 tests (the count at that time; see the remediation section for the current one).
 - The dry-run probe, and the live call to Microsoft Foundry `gpt-5.4-mini`.
 - The adapters through the real AI SDK providers against a stand-in for the network.
 

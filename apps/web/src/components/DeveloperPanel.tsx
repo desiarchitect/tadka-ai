@@ -84,7 +84,10 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ diagnostics }) =
                   <span className="diag-label">Served LLM Model</span>
                   <span className="diag-value">
                     {diagnostics.modelId ? (
-                      diagnostics.modelId
+                      <>
+                        {diagnostics.modelId}
+                        {diagnostics.simulated ? ' (simulated)' : ''}
+                      </>
                     ) : (
                       <span className="na">Unavailable on failed request</span>
                     )}

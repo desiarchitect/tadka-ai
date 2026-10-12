@@ -16,7 +16,7 @@ export type Triage = z.infer<typeof Triage>;
 // gpt-5.4-mini is a reasoning model: this cap covers reasoning tokens as well as the answer.
 export const MAX_OUTPUT_TOKENS = 400;
 
-export async function triage({ model, providerOptions }: ModelPort, message: string) {
+export async function triage({ model, providerOptions }: ModelPort, message: string, opts: { abortSignal?: AbortSignal } = {}) {
   const result = await generateText({
     model,
     output: Output.object({ schema: Triage, name: 'triage' }),
@@ -25,6 +25,7 @@ export async function triage({ model, providerOptions }: ModelPort, message: str
     temperature: 0, // accepted only because the adapter sets reasoningEffort 'none' (GPT-5.1 and later)
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     maxRetries: 0, // a retry would spend budget silently; the probe fails loudly instead
+    abortSignal: opts.abortSignal, // a timeout or cancel must reach the provider call, not just the HTTP response
     // Chosen by the provider adapter in src/llm (no storage, no reasoning tokens). Opaque here.
     providerOptions,
   });

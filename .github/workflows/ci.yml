@@ -5,10 +5,9 @@ on:
 
 jobs:
   test:
-    # Node 24 is the required baseline. Node 26 is a compatibility check and may fail without failing the workflow.
+    # Node 24 and 26 are both in `engines`, so both are tested. A failure on one is not hidden by the other.
     name: node ${{ matrix.node }}
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.node == 26 }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,3 +33,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      # Typechecks every app, then builds the web client (demo sign-in off, as in production).
+      - run: pnpm build
+      # Builds the client with and without VITE_DEMO_LOGIN and searches the output for the demo credentials.
+      - run: pnpm --filter @tadka/web check:bundle

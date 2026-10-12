@@ -6,7 +6,7 @@
     "node": ">=24 <27"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel run dev",
+    "dev": "pnpm -r --parallel --no-bail run dev",
     "build": "pnpm -r run typecheck && pnpm --filter @tadka/web build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",

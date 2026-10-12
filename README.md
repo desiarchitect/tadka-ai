@@ -58,7 +58,7 @@ Seed users (all synthetic, password `Password123!`): `rahul@tadka.test`, `aman@t
 `POST /assist/triage` needs a real provider (see below) or `DEMO_MODE=1` in `.env`. With neither it answers `503 provider_not_configured`.
 In demo mode every answer says `simulated: true` and the page shows a SIMULATED badge. Only customers may call it, at most
 `TRIAGE_RATE_LIMIT_PER_MIN` (10) times a minute per user. That limit is not a spending cap, and the `M0_BUDGET_USD` ledger covers only the CLI probe.
-`pnpm dev` turns on the client's demo sign-in; a production build has it off. Details: RUNBOOK section 9.
+`pnpm dev` turns on the client's demo sign-in; a production build has it off and shows a sign-in form instead. Beside the assistant the page shows the customer's orders (with a Pay button for a `Placed` order) and the restaurants and menus, all read from the API. Details: RUNBOOK sections 5 and 9.
 
 ## Tests
 

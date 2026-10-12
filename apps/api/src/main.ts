@@ -1,5 +1,5 @@
 import { LlmConfigError, createModelHandle, formatMeta, type ModelPort } from './llm/index.js';
-import { MockLanguageModelV4 } from 'ai/test';
+import { demoModel } from './assist/demo-model.js';
 import { buildApp } from './app.js';
 import { BudgetLedger } from './assist/budget.js';
 import { defaultLedgerPath, llmClassifier } from './assist/classifiers.js';
@@ -7,10 +7,11 @@ import { loadSigningKeys } from './identity/access-tokens.js';
 import { HttpPaymentProvider } from './payments/provider.js';
 import { loadConfig } from './shared/config.js';
 import { createDb } from './shared/db.js';
+import { createShutdown, installSignalHandlers, telemetryStage } from './shutdown.js';
 
 const config = loadConfig();
 if (!config.JWT_PRIVATE_JWK) console.warn('JWT_PRIVATE_JWK unset: using a fresh dev signing key; tokens end when the process restarts.');
-const { db } = createDb(config.DATABASE_URL);
+const { db, pool } = createDb(config.DATABASE_URL);
 
 let modelSetup: ReturnType<typeof createModelHandle>;
 try {
@@ -21,24 +22,17 @@ try {
   process.exit(1);
 }
 
-let model: ModelPort;
-if (modelSetup.status === 'ready') {
+let model: ModelPort | undefined;
+if (config.DEMO_MODE) {
+  // Explicit opt-in. Every triage response is marked simulated; a real provider setting is ignored.
+  console.warn('DEMO_MODE=1: /assist/triage returns SIMULATED answers (modelId demo-mock). No real model is called.');
+  model = demoModel();
+} else if (modelSetup.status === 'ready') {
   for (const w of modelSetup.warnings) console.warn(`warning: ${w}`);
   console.log(`llm: ${formatMeta(modelSetup.handle.meta)}`);
   model = modelSetup.handle;
 } else {
-  console.warn(`llm is off: ${modelSetup.reason}; using demo mock model for assist triage.`);
-  model = {
-    model: new MockLanguageModelV4({
-      doGenerate: {
-        content: [{ type: 'text', text: JSON.stringify({ intent: 'order_status', language: 'hinglish', needsHuman: false, summary: 'Demo mode: customer asks about order status.' }) }],
-        finishReason: { unified: 'stop', raw: 'stop' },
-        usage: { inputTokens: { total: 90, noCache: 90, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 30, text: 30, reasoning: 0 } },
-        warnings: [],
-      },
-    }),
-    providerOptions: {},
-  };
+  console.warn(`llm is off: ${modelSetup.reason}. /assist/triage answers 503 provider_not_configured (set DEMO_MODE=1 for simulated answers).`);
 }
 
 const classify = modelSetup.status === 'ready'
@@ -52,6 +46,15 @@ const app = buildApp({
   provider: new HttpPaymentProvider(config.FAKE_PSP_URL),
   classify,
   model,
+  demo: config.DEMO_MODE,
+  triageRateLimitPerMin: config.TRIAGE_RATE_LIMIT_PER_MIN,
+  triageTimeoutMs: config.TRIAGE_TIMEOUT_MS,
   corsOrigins: config.CORS_ORIGIN ? [config.CORS_ORIGIN] : undefined,
 });
 await app.listen({ port: config.PORT, host: '0.0.0.0' });
+
+const shutdownMs = process.env.SHUTDOWN_DEADLINE_MS ? Number(process.env.SHUTDOWN_DEADLINE_MS) : undefined;
+installSignalHandlers(createShutdown({
+  deadlineMs: shutdownMs,
+  stages: [{ name: 'server', run: () => app.close() }, { name: 'database', run: () => pool.end() }, telemetryStage()],
+}));

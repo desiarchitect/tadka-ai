@@ -4,6 +4,7 @@
 // does not prove: how a live deployment behaves (that is the live check).
 import { describe, expect, it } from 'vitest';
 import { BudgetLedger } from '../src/assist/budget.js';
+import { classifyProviderError } from '../src/assist/errors.js';
 import { MAX_OUTPUT_TOKENS, triage } from '../src/assist/triage.js';
 import { createModelHandle, loadLlmConfig, type ModelHandle } from '../src/llm/index.js';
 import { mkdtempSync } from 'node:fs';
@@ -91,6 +92,51 @@ describe.each(CASES)('adapter contract: $name', (c) => {
     const price = (h: ModelHandle) => (h.meta.provider === 'azure' ? 1 : 0);
     if (price(handle)) expect(ledger.record(handle.priceKey, r.usage.inputTokens ?? 0, r.usage.outputTokens ?? 0)).toBeCloseTo((80 * 0.75 + 50 * 4.5) / 1_000_000);
     else expect(() => ledger.record(handle.priceKey, 80, 50)).toThrow(/no price configured/); // no OpenAI price row yet: fails closed
+  });
+});
+
+// Timeout and cancellation, at the network boundary. The stand-in `fetch` below behaves like a real one
+// for aborts: it never answers and rejects with the signal's reason when the signal fires. This proves the
+// signal travels from our call through the real AI SDK provider to `fetch` and that the failure is
+// classified. It does NOT prove that a live Foundry/OpenAI HTTP request is cancelled: that needs the live check.
+describe.each(CASES)('abort signal reaches fetch: $name', (c) => {
+  const hangingFetch = () => {
+    const seen: { signal?: AbortSignal | null }[] = [];
+    const fetchStub = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ signal: init?.signal });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    }) as typeof fetch;
+    return { seen, fetchStub };
+  };
+  const handle = (fetchStub: typeof fetch) => {
+    const setup = createModelHandle(loadLlmConfig(c.env), { fetch: fetchStub });
+    if (setup.status !== 'ready') throw new Error('expected a ready model');
+    return setup.handle;
+  };
+
+  it('a timeout aborts the in-flight request and is classified as provider_timeout', async () => {
+    const { seen, fetchStub } = hangingFetch();
+    const started = Date.now();
+    const err = await triage(handle(fetchStub), 'hello', { abortSignal: AbortSignal.timeout(100) }).then(() => null, (e: unknown) => e);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.signal).toBeInstanceOf(AbortSignal);
+    expect(seen[0]!.signal!.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(3000);
+    const classified = classifyProviderError(err);
+    expect(classified?.status).toBe(504);
+    expect(classified?.message).toBe('provider_timeout');
+  });
+
+  it('a user cancel aborts the request too, and is not reported as a timeout', async () => {
+    const { seen, fetchStub } = hangingFetch();
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 50);
+    const err = await triage(handle(fetchStub), 'hello', { abortSignal: ac.signal }).then(() => null, (e: unknown) => e);
+    expect(seen[0]!.signal!.aborted).toBe(true);
+    expect((err as Error).name).toBe('AbortError');
+    expect(classifyProviderError(err)).toBeNull();
   });
 });
 

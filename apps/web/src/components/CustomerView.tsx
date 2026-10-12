@@ -3,6 +3,9 @@ import type { TriageResponse } from '../api/types.js';
 
 interface CustomerViewProps {
   onSubmit: (message: string) => Promise<void>;
+  onCancel: () => void;
+  /** When set, the form is disabled and this explains why. */
+  unavailableReason?: string | null;
   isLoading: boolean;
   result: TriageResponse | null;
   error: string | null;
@@ -26,6 +29,8 @@ const PRESET_MESSAGES = [
 
 export const CustomerView: React.FC<CustomerViewProps> = ({
   onSubmit,
+  onCancel,
+  unavailableReason = null,
   isLoading,
   result,
   error,
@@ -35,9 +40,11 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || isLoading) return;
+    if (!message.trim() || isLoading || unavailableReason) return;
     onSubmit(message.trim());
   };
+
+  const locked = isLoading || Boolean(unavailableReason);
 
   return (
     <section className="customer-card" aria-labelledby="assistant-heading">
@@ -56,7 +63,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             type="button"
             className="chip"
             onClick={() => setMessage(preset.text)}
-            disabled={isLoading}
+            disabled={locked}
           >
             {preset.label}
           </button>
@@ -75,7 +82,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Type your question or issue in Hinglish, English, or Hindi..."
             maxLength={500}
-            disabled={isLoading}
+            disabled={locked}
             rows={3}
             required
           />
@@ -86,7 +93,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
           <button
             type="submit"
             className="btn-primary"
-            disabled={isLoading || !message.trim()}
+            disabled={locked || !message.trim()}
           >
             {isLoading ? (
               <>
@@ -97,8 +104,19 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
               <span>Submit to Assistant &rarr;</span>
             )}
           </button>
+          {isLoading && (
+            <button type="button" className="btn-sm" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
         </div>
       </form>
+
+      {unavailableReason && (
+        <p className="diag-value na" role="status">
+          {unavailableReason}
+        </p>
+      )}
 
       {/* Error View */}
       {error && (
@@ -118,6 +136,11 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
         <div className="response-container">
           <div className="result-card" role="region" aria-label="Tadka Assistant Response">
             <div className="badge-row">
+              {result.simulated && (
+                <span className="badge badge-simulated" role="status" title="Demo mode: no real model produced this answer">
+                  SIMULATED
+                </span>
+              )}
               <span className="badge badge-intent" title="Classified Intent">
                 Intent: {result.output.intent.replace('_', ' ')}
               </span>
@@ -135,7 +158,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             </div>
 
             <div>
-              <span className="diag-label">Structured Triage Summary:</span>
+              <span className="diag-label">Structured Triage Summary{result.simulated ? ' (simulated, not from a real model)' : ''}:</span>
               <div className="summary-box">{result.output.summary}</div>
             </div>
 

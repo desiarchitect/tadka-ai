@@ -102,7 +102,7 @@ describe('createShutdown (injected stages)', () => {
   });
 });
 
-describe('the API process (documented command)', () => {
+describe.skipIf(process.platform === 'win32')('the API process (documented command) [skipped on Windows: child.kill does not send POSIX signals]', () => {
   let running: Running | undefined;
   let sink: Awaited<ReturnType<typeof blackhole>> | undefined;
   afterEach(async () => { if (running) await stop(running); running = undefined; sink?.server.close(); sink = undefined; });

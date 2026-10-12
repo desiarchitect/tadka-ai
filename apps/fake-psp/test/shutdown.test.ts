@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { blackhole, signal, startApp, stop, unfinishedRequest, waitReady, type Running } from '../../api/test/proc.js';
 
-describe('fake-psp process (documented command)', () => {
+describe.skipIf(process.platform === 'win32')('fake-psp process (documented command) [skipped on Windows: child.kill does not send POSIX signals]', () => {
   let running: Running | undefined;
   let sink: Awaited<ReturnType<typeof blackhole>> | undefined;
   afterEach(async () => { if (running) await stop(running); running = undefined; sink?.server.close(); sink = undefined; });

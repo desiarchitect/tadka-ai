@@ -15,6 +15,7 @@
     "probe:llm": "pnpm --filter @tadka/api probe:llm",
     "eval:intent": "pnpm --filter @tadka/api eval:intent",
     "budget:reservations": "pnpm --filter @tadka/api budget:reservations",
-    "budget:settle": "pnpm --filter @tadka/api budget:settle"
+    "budget:settle": "pnpm --filter @tadka/api budget:settle",
+    "assist:purge": "pnpm --filter @tadka/api assist:purge"
   }
 }

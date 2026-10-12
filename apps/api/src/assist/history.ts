@@ -47,7 +47,7 @@ export function selectHistory(turns: StoredTurn[], budgetBytes = HISTORY_BUDGET_
   const dropped = turns.slice(0, turns.length - kept.length);
   const note: ModelMessage[] = dropped.length ? [{ role: 'user', content: contextNote(dropped) }] : [];
   const messages = [...note, ...kept.flatMap((t) => t.messages as ModelMessage[])];
-  return { messages, turnsSent: kept.length, turnsDropped: dropped.length, historyBytes: Buffer.byteLength(JSON.stringify(messages), 'utf8') };
+  return { messages, turnsSent: kept.length, turnsDropped: dropped.length, historyBytes: messages.length ? Buffer.byteLength(JSON.stringify(messages), 'utf8') : 0 };
 }
 
 // What to carry from dropped turns: which orders and restaurants were discussed, by id and

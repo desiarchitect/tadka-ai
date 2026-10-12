@@ -2,10 +2,11 @@
 // interfaces; they never read the database themselves.
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { MemoriesService, Prefs } from '../memory/service.js';
 import type { OrdersService } from '../orders/service.js';
 import { ForbiddenError, UpstreamError } from '../shared/errors.js';
 import type { Principal } from '../shared/principal.js';
-import type { TurnResult } from './agent-loop.js';
+import type { TurnOptions, TurnResult } from './agent-loop.js';
 import type { IntentClassifier } from './classifiers.js';
 import { FALLBACK, nextStep } from './next-step.js';
 
@@ -14,7 +15,8 @@ type Deps = {
   principal: (req: FastifyRequest) => Promise<Principal>;
   parse: <T>(schema: z.ZodType<T>, v: unknown) => T;
   classify: IntentClassifier;
-  chat?: (p: Principal, text: string) => Promise<TurnResult>;
+  chat?: (p: Principal, text: string, opts?: TurnOptions & { prefs?: Prefs }) => Promise<TurnResult>;
+  memories: MemoriesService;
 };
 
 const orderStatusQuery = z.object({ orderId: z.uuid() });
@@ -52,7 +54,7 @@ export function registerAssistRoutes(app: FastifyInstance, deps: Deps) {
     if (p.role !== 'Customer') throw new ForbiddenError('customers_only');
     const { text } = deps.parse(textBody, req.body);
     if (!deps.chat) throw Object.assign(new Error('assistant_not_configured'), { status: 503 });
-    const r = await deps.chat(p, text);
+    const r = await deps.chat(p, text, { prefs: await deps.memories.get(p) });
     return { answer: r.answer, stopReason: r.stopReason, steps: r.steps };
   });
 }

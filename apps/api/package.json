@@ -12,7 +12,8 @@
     "probe:llm": "node --env-file-if-exists=../../.env --import tsx scripts/probe-llm.ts",
     "eval:intent": "node --env-file-if-exists=../../.env --import tsx scripts/eval-intent.ts",
     "budget:reservations": "node --env-file-if-exists=../../.env --import tsx scripts/budget.ts reservations",
-    "budget:settle": "node --env-file-if-exists=../../.env --import tsx scripts/budget.ts settle"
+    "budget:settle": "node --env-file-if-exists=../../.env --import tsx scripts/budget.ts settle",
+    "assist:purge": "node --env-file-if-exists=../../.env --import tsx scripts/purge-conversations.ts"
   },
   "dependencies": {
     "@ai-sdk/azure": "4.0.99",

@@ -5,6 +5,37 @@ and leaves the earlier sections alone, so this file always tells the whole story
 
 Format: Added, Changed, Fixed, Removed. "Verified" lines say what was actually run.
 
+## ep03-conversation-memory - 2026-10-12
+
+Episode 3: conversation memory. Starts from `ep02-typed-tool-calling`.
+
+### Added
+- A Postgres schema `assist` with its own migration and no foreign keys into other schemas: `conversations` (owner, version, turn count, last message time), `turns` (what the customer saw: question, answer, stop reason, steps), `messages` (the exact model messages of each turn) and `memories` (one row per customer and kind; the database only accepts `diet` = `vegetarian`).
+- `src/memory/service.ts`: conversations and memories, scoped by the caller for every method. Another customer's conversation is not found, exactly like an invented id, in one SQL statement. A turn is written in one transaction that only succeeds if the conversation's version is unchanged since the turn started; otherwise 409 `conversation_busy` and nothing is stored. 50 turns per conversation (then 409 `conversation_full`).
+- Routes, customers only: `POST /assist/conversations`, `GET /assist/conversations` (20 most recent), `GET /assist/conversations/:id` (questions and answers, never tool internals), `DELETE /assist/conversations/:id`, `POST /assist/conversations/:id/messages` (returns `answer`, `stopReason`, `steps` and `context: { turnsSent, turnsDropped, historyBytes }`), `GET /assist/memories`, `PUT /assist/memories/diet`, `DELETE /assist/memories/diet`.
+- `src/assist/history.ts`: the history sent with a question is the newest whole turns that fit in 12 KB, so a tool call and its result always travel together. Older turns become one note written by the application, with order and restaurant ids and quoted names only, never a status, total or price. The model's instructions say the note comes from the application and is never a request.
+- Before every request to the model the loop checks that every tool result has its call and every call has exactly one result; otherwise it sends nothing and stops with `invalid_history`.
+- `apps/api/demo/naive-trim.ts`: "keep the last N messages". A test shows it cutting a tool result away from its call, and a stand-in model that enforces the provider's rule rejecting the request with a 400.
+- A vegetarian flag on menu items (seeded). With the preference saved, `get_restaurant_menu` returns vegetarian items only and the answer says so. The model cannot read or write memories.
+- `pnpm assist:purge`: deletes conversations with no message in the last 30 days.
+- Tests: 173 (165 API, 8 fake provider), 33 of them new. One test captures the API's real log output (`buildApp` takes an optional `logStream`) and checks that a turn's text, answer and order details never appear in it, including when the provider fails.
+- `RUNBOOK.md` section 8 (bash and PowerShell), README section, new troubleshooting rows.
+
+### Changed
+- Tool results are numbered per turn (`t3r1`), and `final_answer` may only show results from the current turn, so an old status can't be presented as current. `final_answer` now gets a stored result (`{ "status": "shown" }`) so every stored call has its result.
+- `POST /assist/chat` is unchanged and still single turn; it also applies a saved vegetarian preference.
+- `pnpm db:seed` also empties conversations and saved preferences.
+- The EP2 payload-cap test computes its cap from the real first request, so it no longer depends on the length of the instructions.
+- The boundary test covers the new files, allows `assist` to use the memory service only, and checks that the turn log line has no message text.
+- The runbook is now for this branch; sections after section 7 moved down by one number.
+
+### Verified
+- Typecheck and 173 of 173 tests on Node 24 and Node 26.
+- On a clean clone: install, migrate, seed, `pnpm dev`; conversation and memory routes, and 503 for a message without a model, in bash and PowerShell; `pnpm assist:purge`.
+
+### Not in this branch
+- A model-written summary of old turns, memory the model can write, deleting all of a customer's data, tools that change anything, RAG and prompt-injection defences. They arrive in later episode branches.
+
 ## ep02-typed-tool-calling - 2026-10-11
 
 Episode 2: typed tool calling with server-side identity. Starts from `ep01-structured-intent`.

@@ -18,7 +18,7 @@ What you will see when it runs:
 | A React + Vite customer-facing visual client with developer telemetry panel | `http://localhost:5173` |
 | A fake payment provider you can make succeed, decline, time out or fail on demand | `http://localhost:4010` |
 | One request traced across services | Jaeger at `http://localhost:16686` |
-| 78 passing tests (67 API + 8 fake provider + 3 web client) | `pnpm test` |
+| 173 passing tests (130 API + 13 fake provider + 30 web client) | `pnpm test` |
 | One typed answer from a language model, from Microsoft Foundry or direct OpenAI | `pnpm probe:llm` (section 9) |
 
 What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, refunds. Those arrive in later episode branches.
@@ -137,6 +137,10 @@ pnpm db:seed
 pnpm dev
 ```
 
+> **Before you open the browser page:** `.env` copies as `DEMO_MODE=0`, so the assistant has no model yet and answers
+> `503 provider_not_configured`. Pick one: add provider credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart `pnpm dev`
+> for clearly labelled SIMULATED answers. Section 5 ("Recording a demo") says which to choose.
+
 ## 4. The commands, one by one
 
 ### `git checkout ep00-start`
@@ -177,10 +181,20 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `AZURE_API_KEY` | empty | With `LLM_PROVIDER=azure` | KEY 1 of that resource. See section 9 |
 | `AZURE_DEPLOYMENT` | `gpt-5.4-mini` | With `LLM_PROVIDER=azure` | The name you gave the model deployment. It must be named like a GPT model. See section 9 |
 | `OPENAI_API_KEY` | empty | With `LLM_PROVIDER=openai` | Your key for the direct OpenAI API. See section 9 |
-| `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe |
+| `M0_BUDGET_USD` | `5` | No | Hard spending cap enforced by the probe. It does **not** limit the HTTP route (see "The assist endpoint" in section 9) |
+| `DEMO_MODE` | `0` | No | `1`: `POST /assist/triage` returns SIMULATED answers and calls no model. `0` or empty: off. Anything else: the API refuses to start |
+| `TRIAGE_RATE_LIMIT_PER_MIN` | `10` | No | Requests per minute per signed-in user on `POST /assist/triage` |
+| `TRIAGE_TIMEOUT_MS` | `15000` | No | Longest the API waits for the model on one request |
+| `CORS_ORIGIN` | empty | No | One browser origin allowed to call the API. Empty = `http://localhost:5173` and `:4173` |
+| `SHUTDOWN_DEADLINE_MS` | `8000` | No (ops/test knob) | Overall time `Ctrl+C` / SIGTERM may take before the process is forced to exit |
 
 Everything except the provider credentials already works as copied. You can run the whole branch, including all tests and
 the dry-run probe, without filling anything in.
+
+**The browser assistant needs one of two things.** Either provider credentials (section 9), or `DEMO_MODE=1` in `.env`.
+With neither, `POST /assist/triage` answers `503 provider_not_configured`: the server never pretends to be a model.
+With `DEMO_MODE=1` every answer is marked `simulated: true`, carries `modelId: "demo-mock"`, and the page shows a SIMULATED badge.
+If you add real credentials, set `DEMO_MODE=0` (a real provider setting is ignored while demo mode is on).
 
 Do not set `PORT` in `.env`: the API (3000) and the fake provider (4010) both read it and would collide.
 Never paste your key into a chat, an issue or a commit.
@@ -229,13 +243,33 @@ The fake provider keeps its state in memory, so a restart is a clean slate for i
 Open `http://localhost:5173` in any browser while `pnpm dev` is running:
 
 1. **Brand & Demo Banner**: View the Tadka branding and the clear reminder that this is a local learning & demo environment running against real backend services.
-2. **Simulate Identity**: The app signs in as Rahul (`rahul@tadka.test`) by default. You can switch to Aman or click **Sign Out** at any time.
-3. **Submit an Inquiry**: Click the **Late Order (Hinglish)** sample chip or type your own inquiry, then click **Submit to Assistant**.
+2. **Simulate Identity**: `pnpm dev` runs the client with its demo sign-in on (`apps/web/.env.development` sets `VITE_DEMO_LOGIN=1`), so it signs in as Rahul (`rahul@tadka.test`) by default. You can switch to Aman or click **Sign Out** at any time. A production build (`pnpm build`) has the demo sign-in off and shows "Not signed in"; for a recorded demo build use `VITE_DEMO_LOGIN=1 pnpm --filter @tadka/web build`.
+3. **Submit an Inquiry**: Click the **Late Order (Hinglish)** sample chip or type your own inquiry, then click **Submit to Assistant**. While it waits you can click **Cancel**. Without provider credentials you need `DEMO_MODE=1` (section 4); the answer is then labelled **SIMULATED**.
 4. **Review Real Backend Output**: Inspect the actual structured classification returned by `POST /assist/triage`: Intent (`order_status`), Language (`hinglish`), Human Escalation flag, and the triage summary.
 5. **Inspect Developer Diagnostics**: Expand the **Developer Demonstration Panel** at the bottom. It displays real values returned by the backend: HTTP status code, client-measured latency, served model name, token usage, Fastify request ID, and the real OpenTelemetry Trace ID.
 6. **Verify Distributed Trace**: Copy the Trace ID shown in the Developer Panel and open Jaeger at `http://localhost:16686`. Search for the Trace ID to inspect the full trace.
 7. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
 
+
+### Recording a demo (the explicit opt-in)
+
+`DEMO_MODE` is **off** in the `.env` template on purpose: nothing is ever simulated unless you switched it on. Choose the mode before you record.
+
+| You want to show | Settings in `.env` | What the viewer sees |
+|---|---|---|
+| **A real model answering** | Provider credentials (section 9) and `DEMO_MODE=0` | No SIMULATED badge. The Developer Panel shows the model name the provider reported. Run `pnpm probe:llm -- --live` once first to prove the credentials work (it makes one paid call, about a tenth of a cent) |
+| **The whole flow with no cloud account** | `DEMO_MODE=1` (credentials not needed) | A yellow **SIMULATED** badge on every answer and `demo-mock` as the model in the Developer Panel. The answer does not depend on the message. Say so on camera |
+| Neither | `DEMO_MODE=0`, no credentials | An error card: "No AI model is configured on the server" (`503 provider_not_configured`) |
+
+Steps for a simulated recording:
+
+1. In `.env`, set `DEMO_MODE=1` (exactly `1`; `true` or `yes` stop the API from starting).
+2. Restart `pnpm dev`. The API prints `DEMO_MODE=1: /assist/triage returns SIMULATED answers (modelId demo-mock). No real model is called.` If you do not see that line, demo mode is not on.
+3. Submit a message. Check for the SIMULATED badge and `demo-mock` before you start recording.
+
+Notes: while `DEMO_MODE=1` a real provider setting is ignored, so set it back to `0` (or empty) when you want the real model.
+`pnpm dev` also runs the web page with its demo sign-in on. A production build of the page (`pnpm build`) has the demo sign-in off and cannot be used to
+record; for a recorded build of the page use `VITE_DEMO_LOGIN=1 pnpm --filter @tadka/web build`.
 
 Run these in a second terminal. First, a helper that logs in and prints a token:
 
@@ -247,7 +281,7 @@ login() {
 RAHUL=$(login rahul@tadka.test)
 ```
 
-**Health.** `curl -s localhost:3000/health` and `curl -s localhost:4010/health` both return `{"status":"ok"}`.
+**Health.** `curl -s localhost:3000/health` and `curl -s localhost:4010/health` both return `{"status":"ok"}`. This is liveness only: it says the process is up, not that Postgres or the model provider is reachable.
 
 **Public data.** `curl -s localhost:3000/restaurants` lists Biryani House, Chai Point and Spice Garden.
 `curl -s localhost:3000/restaurants/aaaaaaaa-0000-4000-8000-000000000001/menu` shows Spice Garden's items. Prices are in paise.
@@ -427,7 +461,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 8 fake-provider tests and 61 API tests pass. Your dev database is never touched.
+Expected: 13 fake-provider tests, 130 API tests and 30 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -437,8 +471,15 @@ Expected: 8 fake-provider tests and 61 API tests pass. Your dev database is neve
 | `payments.test.ts` (5) | Cross-user payment is refused, timeout is resolved by lookup, error then retry charges once, paying twice is a no-op, the money constraint |
 | `triage.test.ts` (6) | The LLM call returns a typed object, rejects a bad shape and passes the adapter's options through untouched; the budget guard refuses before sending; a provider and model with no price is refused, even if another provider has one; every price row names its source and date |
 | `llm-config.test.ts` (8) | Provider selection: `LLM_PROVIDER` decides; an explicit provider without credentials is an error that names variables, never values; Azure-only settings still work, with a warning; both providers present and no choice is refused; the Azure deployment name is kept apart from the model we price |
-| `llm-contract.test.ts` (12) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
+| `llm-contract.test.ts` (16) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
 | `llm-boundary.test.ts` (6) | Only `src/llm` imports a vendor SDK, builds a provider client or builds provider option objects; scripts get their model from the same factory |
+| `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
+| `assist-errors.test.ts` (15) | Provider failures (401, 403, 429, 500, 404, network, 504, bad output) become our own status and code; provider text, keys, resource names and the customer's message never reach the response or the log; a provider auth failure is not a 401; a hung call is cut off at the timeout and the model sees the abort |
+| `assist-access.test.ts` (14) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
+| `startup.test.ts` (8) | The real server process: no provider and no demo mode is `503 provider_not_configured`; `DEMO_MODE=1` is `simulated: true`; a bad `DEMO_MODE` refuses to start |
+| `shutdown.test.ts` (20) | The shutdown sequence (order, a failing stage, a hang in each stage position, a stage finishing after the deadline, repeated signals, the root `--no-bail` setting) and the real process with telemetry off, on and refused, with a server close stuck on an unfinished request, and with a trace backend that never answers |
+| `fake-psp/test/shutdown.test.ts` (5) | The same shutdown contract for the fake provider |
+| `web/test/*.test.ts(x)` (30) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
 ## 9. The LLM probe
@@ -450,6 +491,46 @@ pnpm probe:llm -- --live       # ONE real call to the series model (gpt-5.4-mini
 
 The dry run prints a typed answer (`intent`, `language`, `needsHuman`, `summary`) from a fake model. It proves the
 code path and the schema, not the provider.
+
+### The assist endpoint: modes, limits, errors, shutdown
+
+`POST /assist/triage` (the route the browser uses):
+
+| Situation | Answer |
+|---|---|
+| No token | `401 missing_token` or `invalid_token` |
+| Signed in as an owner or admin | `403 forbidden_role` (customers only; the role comes from the signed token, never from the request body) |
+| More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute from one user | `429 rate_limited` with `Retry-After`. Other users are not affected |
+| No provider configured and `DEMO_MODE` off | `503 provider_not_configured` |
+| `DEMO_MODE=1` | `200` with `simulated: true`, `modelId: "demo-mock"`. No model is called |
+| Real provider answers | `200` with `simulated: false` and the model name the provider reported |
+| Provider rejects the key or permission | `502 provider_auth` (this is **not** a 401: the caller's own sign-in was fine) |
+| Provider is rate limiting us | `429 provider_rate_limited` |
+| Provider down, network failure, any other provider error | `502 provider_unavailable` |
+| Provider does not answer within `TRIAGE_TIMEOUT_MS` | `504 provider_timeout`; the call is aborted |
+| Provider answered with something that is not valid triage JSON | `502 provider_bad_output` |
+
+The error text is always ours. Provider messages, keys, resource names and the customer's message are not in the response or in the log
+(the log keeps the error class, the provider's status number and our code).
+
+What the limits are, and are not:
+- The rate limit is basic abuse protection. It lives in the API process's memory, so it resets on restart and is not shared between several instances.
+- **The `M0_BUDGET_USD` ledger does not apply to this route.** It guards only `pnpm probe:llm -- --live`. The HTTP route is bounded by the rate limit, the 500-character input, the 400-token output cap and `maxRetries: 0`; there is no hard money cap.
+- The timeout aborts the call at the AI SDK / `fetch` boundary (proved against a stand-in for the network). Whether a live Foundry request is cancelled on the provider's side has not been checked.
+
+Stopping the servers is bounded: the API and the fake provider stop accepting requests, close the database (API only),
+flush traces for up to 3 seconds, and exit. The whole sequence has an 8 second deadline (`SHUTDOWN_DEADLINE_MS`); after that the process is
+forced to exit with code 1, whichever step is stuck. **A request still running at the deadline is abandoned.** Exit code 0 means every step finished;
+1 means a step failed or the deadline hit (for example when the trace backend is down). A second signal does not start a second shutdown.
+
+Which way of starting and stopping gives you that:
+
+| How it was started, and how it is stopped | Graceful shutdown? |
+|---|---|
+| `pnpm dev`, then **Ctrl+C** in that terminal | **Yes** for the API and the fake provider. Checked with the trace backend unreachable: both closed the server (and the API its database), tried the trace flush, and exited in about 5 s. pnpm itself then ends with `ERR_PNPM_RECURSIVE_FAIL` because the Vite dev server exits with a failure code on Ctrl+C; that is harmless. The root `dev` script uses `--no-bail` for this: without it pnpm kills the other apps as soon as Vite exits. The trade-off: if one app crashes at start, the others keep running until you press Ctrl+C. A successful trace flush to a running Jaeger has **not** been checked through this command |
+| The `node …` command from an app's `dev` or `start` script (`node --env-file-if-exists=../../.env --import tsx --import ./src/instrument.ts src/main.ts`) run directly, then SIGTERM or SIGINT to that node process | **Yes.** This is what the automated shutdown tests run |
+| SIGTERM sent to a `pnpm` process: `kill <pid of pnpm>`, `docker stop` or a CI cancel where pnpm is the main process, for `pnpm dev`, `pnpm --filter … dev` or `pnpm exec node …` | **No.** pnpm 12.11.2 does not pass SIGTERM to the apps it started, and they keep running (checked for all three). In a container or under a process manager, run the `node …` command directly |
+| SIGKILL, power loss | No, by definition |
 
 ### Switch provider
 
@@ -570,6 +651,10 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `AZURE_API_KEY and AZURE_RESOURCE_NAME must be set` | `--live` without credentials | Fill them in `.env` |
 | No traces in Jaeger | Jaeger is not running, or `OTEL_EXPORTER_OTLP_ENDPOINT` is empty | Start with `--profile observability`; check `.env` |
 | PowerShell prints `ConvertFrom-Json : Cannot bind argument to parameter 'InputObject' because it is null` and `[0]` | The `Call` helper from an older copy of this runbook sent a body with GET requests, which Windows PowerShell 5.1 refuses | Paste the `Call` and `Login` helpers from section 5 again |
+| The browser says "No AI model is configured on the server" (`503 provider_not_configured`) | No provider credentials, and `DEMO_MODE` is off | Add credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart |
+| The page says "Not signed in. The demo sign-in is switched off" | The client was built without `VITE_DEMO_LOGIN=1` (a production build) | Use `pnpm dev`, or build with `VITE_DEMO_LOGIN=1` |
+| `DEMO_MODE must be "1" or "0"` at start | `DEMO_MODE` has another value (`true`, `yes`) | Use `1`, `0` or leave it empty |
+| `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |
 
 ## 11. Teardown

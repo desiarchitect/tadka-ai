@@ -96,6 +96,7 @@ describe('CORS, trace headers, and assist triage route', () => {
     expect(body.authenticatedAs.userId).toBe(IDS.rahul);
     expect(body.authenticatedAs.role).toBe('Customer');
     expect(body.modelId).toBeDefined();
+    expect(body.simulated).toBe(false); // a real-model app says so explicitly
   });
 
   it('POST /assist/triage returns 503 if model is not configured', async () => {
@@ -116,6 +117,41 @@ describe('CORS, trace headers, and assist triage route', () => {
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('provider_not_configured');
     await appWithoutModel.close();
+    await pool.end();
+  });
+});
+
+describe('CORS for a disallowed origin', () => {
+  it('is not an error: no 500, no CORS headers, no error log. (CORS is a browser rule; auth and role still decide who may call.)', async () => {
+    const { db, pool } = createDb(TEST_DB_URL);
+    const lines: string[] = [];
+    const app = buildApp({
+      db, keys: await loadSigningKeys(), provider: new HttpPaymentProvider('http://localhost:4010'), corsOrigins: ['http://localhost:5173'],
+      logger: { level: 'info', stream: { write: (l: string) => void lines.push(l) } },
+    });
+    const evil = { origin: 'http://evil.example' };
+    const preflight = await app.inject({ method: 'OPTIONS', url: '/assist/triage', headers: { ...evil, 'access-control-request-method': 'POST' } });
+    expect(preflight.statusCode).toBeLessThan(500);
+    expect(preflight.headers['access-control-allow-origin']).toBeUndefined();
+    const simple = await app.inject({ method: 'GET', url: '/health', headers: evil });
+    expect(simple.statusCode).toBe(200); // the server still answers; the browser just will not let the page read it
+    expect(simple.headers['access-control-allow-origin']).toBeUndefined();
+    const unauth = await app.inject({ method: 'POST', url: '/assist/triage', headers: evil, payload: { message: 'hi' } });
+    expect(unauth.statusCode).toBe(401); // authentication is enforced regardless of CORS
+    const log = lines.join('');
+    expect(log).not.toContain('cors_not_allowed');
+    expect(log).not.toContain('"level":50');
+    expect(log).not.toContain('"level":40');
+    await app.close();
+    await pool.end();
+  });
+
+  it('an allowed origin still gets its headers on a normal request', async () => {
+    const { db, pool } = createDb(TEST_DB_URL);
+    const app = buildApp({ db, keys: await loadSigningKeys(), provider: new HttpPaymentProvider('http://localhost:4010'), corsOrigins: ['http://localhost:5173'] });
+    const res = await app.inject({ method: 'GET', url: '/health', headers: { origin: 'http://localhost:5173' } });
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    await app.close();
     await pool.end();
   });
 });

@@ -17,7 +17,7 @@ export const Header: React.FC = () => {
       <div className="demo-banner" role="alert">
         <span aria-hidden="true">&#9888;&#65039;</span>
         <span>
-          <strong>Local Demo &amp; Learning Environment:</strong> Calls real Fastify backend with real JWT authentication and model triage. No mocked chat loop.
+          <strong>Local Demo &amp; Learning Environment:</strong> This page calls the local Tadka API. If the server runs in demo mode, its answers are labelled SIMULATED and no real model is used.
         </span>
       </div>
     </header>

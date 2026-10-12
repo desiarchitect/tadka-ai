@@ -53,6 +53,13 @@ Traces: http://localhost:16686 (service `tadka-api`).
 Seed users (all synthetic, password `Password123!`): `rahul@tadka.test`, `aman@tadka.test` (customers),
 `owner@tadka.test` (Spice Garden owner), `admin@tadka.test`.
 
+## The assistant in the browser
+
+`POST /assist/triage` needs a real provider (see below) or `DEMO_MODE=1` in `.env`. With neither it answers `503 provider_not_configured`.
+In demo mode every answer says `simulated: true` and the page shows a SIMULATED badge. Only customers may call it, at most
+`TRIAGE_RATE_LIMIT_PER_MIN` (10) times a minute per user. That limit is not a spending cap, and the `M0_BUDGET_USD` ledger covers only the CLI probe.
+`pnpm dev` turns on the client's demo sign-in; a production build has it off. Details: RUNBOOK section 9.
+
 ## Tests
 
 ```bash

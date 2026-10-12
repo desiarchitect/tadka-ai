@@ -1,5 +1,9 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import cors from '@fastify/cors';
+import { trace } from '@opentelemetry/api';
+import type { ModelPort } from './llm/types.js';
 import { z } from 'zod';
+import { triage } from './assist/triage.js';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
 import { IdentityService } from './identity/service.js';
 import type { LanguageModel } from 'ai';
@@ -19,7 +23,15 @@ import type { Principal } from './shared/principal.js';
 
 // `providerOptions` and `config.priceKey` come from the ModelHandle built in src/llm.
 export type AssistantDeps = { model: LanguageModel; providerOptions: ProviderOptions; ledger: BudgetLedger; config: LoopConfig; audit: SecurityAudit };
-export type AppDeps = { db: Db; keys: SigningKeys; provider: PaymentProvider; classify?: IntentClassifier; assistant?: AssistantDeps };
+export type AppDeps = {
+  db: Db;
+  keys: SigningKeys;
+  provider: PaymentProvider;
+  classify?: IntentClassifier;
+  assistant?: AssistantDeps;
+  model?: ModelPort;
+  corsOrigins?: string[];
+};
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' } });
@@ -27,6 +39,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const restaurants = new RestaurantsService(deps.db);
   const payments = new PaymentsService(deps.db, deps.provider);
   const orders = new OrdersService(deps.db, payments);
+
+  const allowedOrigins = deps.corsOrigins ?? [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:4173',
+    'http://127.0.0.1:4173',
+  ];
+  app.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error('cors_not_allowed'), false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    exposedHeaders: ['x-trace-id', 'x-request-id'],
+  });
+
+  app.addHook('onSend', async (req, reply) => {
+    const span = trace.getActiveSpan();
+    const traceId = span?.spanContext().traceId;
+    if (traceId) reply.header('x-trace-id', traceId);
+    reply.header('x-request-id', req.id);
+  });
 
   // Map domain errors to HTTP. Anything without a status is a 500 with no details.
   app.setErrorHandler((err: Error & { status?: number; statusCode?: number }, _req, reply) => {
@@ -69,6 +107,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     log: (e) => app.log.warn(e),
   }, p, text));
   registerAssistRoutes(app, { orders, principal, parse, classify: deps.classify ?? rulesClassifier, chat });
+
+  const triageBody = z.object({ message: z.string().trim().min(1).max(500) });
+  app.post('/assist/triage', async (req) => {
+    const p = await principal(req);
+    const b = parse(triageBody, req.body);
+    if (!deps.model) throw Object.assign(new Error('provider_not_configured'), { status: 503 });
+    const r = await triage(deps.model, b.message);
+    return {
+      output: r.output,
+      usage: r.usage,
+      modelId: r.modelId ?? 'gpt-5.4-mini',
+      authenticatedAs: { userId: p.userId, role: p.role },
+    };
+  });
 
   return app;
 }

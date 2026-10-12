@@ -20,15 +20,16 @@ What you will see when it runs:
 
 | You will see | Where |
 |---|---|
-| A REST API with login, token refresh, restaurants, orders and payment | `http://localhost:3000` |
+| A REST API with login, token refresh, restaurants, orders, payment and assist triage | `http://localhost:3000` |
+| A React + Vite customer-facing visual client with developer telemetry panel | `http://localhost:5173` |
 | A fake payment provider you can make succeed, decline, time out or fail on demand | `http://localhost:4010` |
-| One request traced across both processes | Jaeger at `http://localhost:16686` |
+| One request traced across services | Jaeger at `http://localhost:16686` |
 | One typed answer from a language model, from Microsoft Foundry or the direct OpenAI API | `pnpm probe:llm` (section 11) |
 | A deterministic order-status route and a free-text intent route | Section 6 |
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
 | The naive tool leaking another customer's address, and the fix | Section 7 |
 | `POST /assist/chat`: a question answered with tools | Section 7 |
-| 168 passing tests (160 API + 8 fake provider) | `pnpm test` |
+| 171 passing tests (160 API + 8 fake provider + 3 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: conversations (each question stands alone), tools that change anything,
 RAG, and defences against prompt injection beyond labelling database text as data. Those arrive in later episode branches.
@@ -52,7 +53,7 @@ What you need:
 | `curl` | any | Calls the API in the bash walkthrough. Included with macOS, Linux and Git Bash. Not needed in PowerShell |
 | `jq` | any | Reads JSON in the bash walkthrough. Not needed in PowerShell |
 
-Also free: about 1 GB of RAM and 1 GB of disk for images, and ports 3000, 4010, 5544, 16686 and 4318.
+Also free: about 1 GB of RAM and 1 GB of disk for images, and ports 3000, 4010, 5173, 5544, 16686 and 4318.
 No paid account is needed, except for the optional live LLM call (section 11).
 
 ### Windows 10/11
@@ -227,16 +228,30 @@ Run it any time you want a clean database.
 | `admin@tadka.test` | Admin | `Password123!` |
 
 ### `pnpm dev`
-Starts both apps in parallel:
+Starts all three apps in parallel:
 
 - the API on port 3000 (`apps/api`)
 - the fake payment provider on port 4010 (`apps/fake-psp`)
+- the customer visual client on port 5173 (`apps/web`)
 
 On start the API prints `JWT_PRIVATE_JWK unset: using a fresh dev signing key`. That means tokens are signed with a key
 created at start-up, so **every restart invalidates all tokens**. Log in again after a restart.
 The fake provider keeps its state in memory, so a restart is a clean slate for it (see section 9).
 
 ## 5. Walkthrough: what to run and what you should see
+
+### Visual Client Walkthrough (in your browser)
+
+Open `http://localhost:5173` in any browser while `pnpm dev` is running:
+
+1. **Brand & Demo Banner**: View the Tadka branding and the clear reminder that this is a local learning & demo environment running against real backend services.
+2. **Simulate Identity**: The app signs in as Rahul (`rahul@tadka.test`) by default. You can switch to Aman or click **Sign Out** at any time.
+3. **Submit an Inquiry**: Click the **Late Order (Hinglish)** sample chip or type your own inquiry, then click **Submit to Assistant**.
+4. **Review Real Backend Output**: Inspect the actual structured classification returned by `POST /assist/triage`: Intent (`order_status`), Language (`hinglish`), Human Escalation flag, and the triage summary.
+5. **Inspect Developer Diagnostics**: Expand the **Developer Demonstration Panel** at the bottom. It displays real values returned by the backend: HTTP status code, client-measured latency, served model name, token usage, Fastify request ID, and the real OpenTelemetry Trace ID.
+6. **Verify Distributed Trace**: Copy the Trace ID shown in the Developer Panel and open Jaeger at `http://localhost:16686`. Search for the Trace ID to inspect the full trace.
+7. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
+
 
 Run these in a second terminal. First, a helper that logs in and prints a token:
 

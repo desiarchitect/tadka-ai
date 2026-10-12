@@ -1,10 +1,11 @@
+import { LlmConfigError, createModelHandle, formatMeta, type ModelPort } from './llm/index.js';
+import { MockLanguageModelV4 } from 'ai/test';
 import { buildApp } from './app.js';
 import { BudgetLedger } from './assist/budget.js';
 import { DEFAULT_LOOP } from './assist/agent-loop.js';
 import { defaultLedgerPath, llmClassifier } from './assist/classifiers.js';
 import { fileAudit } from './assist/tools/audit.js';
 import { loadSigningKeys } from './identity/access-tokens.js';
-import { LlmConfigError, createModelHandle, formatMeta } from './llm/index.js';
 import { HttpPaymentProvider } from './payments/provider.js';
 import { loadConfig } from './shared/config.js';
 import { createDb } from './shared/db.js';
@@ -14,11 +15,14 @@ if (!config.JWT_PRIVATE_JWK) console.warn('JWT_PRIVATE_JWK unset: using a fresh 
 const { db } = createDb(config.DATABASE_URL);
 const ledger = new BudgetLedger(defaultLedgerPath(), config.M0_BUDGET_USD);
 let setup: ReturnType<typeof createModelHandle>;
-try { setup = createModelHandle(); } catch (e) {
+try {
+  setup = createModelHandle();
+} catch (e) {
   if (!(e instanceof LlmConfigError)) throw e;
   console.error(`${e.message}. Fix the LLM settings in .env, or clear them to run without a model.`);
   process.exit(1);
 }
+
 if (setup.status === 'ready') for (const w of setup.warnings) console.warn(`warning: ${w}`);
 const handle = setup.status === 'ready' ? setup.handle : undefined;
 const classify = handle && llmClassifier(handle, ledger);
@@ -29,9 +33,40 @@ const { released, ambiguous } = ledger.reconcile();
 if (released) console.log(`budget: released ${released} reservation(s) that were never sent`);
 if (ambiguous.length) console.warn(`budget: ${ambiguous.length} sent request(s) were never settled and stay held. Run pnpm budget:reservations.`);
 const assistant = handle && {
-  model: handle.model, providerOptions: handle.providerOptions, ledger, audit: fileAudit('logs/security-audit.jsonl', config.AUDIT_HMAC_KEY || undefined),
-  config: { ...DEFAULT_LOOP, priceKey: handle.priceKey, maxOutputTokens: config.ASSIST_MAX_OUTPUT_TOKENS, turnBudgetUsd: config.ASSIST_TURN_BUDGET_USD, estimateMargin: config.ASSIST_ESTIMATE_MARGIN },
+  model: handle.model,
+  providerOptions: handle.providerOptions,
+  ledger,
+  audit: fileAudit('logs/security-audit.jsonl', config.AUDIT_HMAC_KEY || undefined),
+  config: {
+    ...DEFAULT_LOOP,
+    priceKey: handle.priceKey,
+    maxOutputTokens: config.ASSIST_MAX_OUTPUT_TOKENS,
+    turnBudgetUsd: config.ASSIST_TURN_BUDGET_USD,
+    estimateMargin: config.ASSIST_ESTIMATE_MARGIN,
+  },
 };
 console.log(`POST /assist/chat: ${handle ? `${formatMeta(handle.meta)}, priced as ${handle.priceKey}` : `off (${setup.status === 'off' ? setup.reason : ''})`}`);
-const app = buildApp({ db, keys: await loadSigningKeys(config.JWT_PRIVATE_JWK), provider: new HttpPaymentProvider(config.FAKE_PSP_URL), classify, assistant });
+
+const model: ModelPort = handle ?? {
+  model: new MockLanguageModelV4({
+    doGenerate: {
+      content: [{ type: 'text', text: JSON.stringify({ intent: 'order_status', language: 'hinglish', needsHuman: false, summary: 'Demo mode: customer asks about order status.' }) }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage: { inputTokens: { total: 90, noCache: 90, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 30, text: 30, reasoning: 0 } },
+      warnings: [],
+    },
+  }),
+  providerOptions: {},
+};
+
+const app = buildApp({
+  db,
+  keys: await loadSigningKeys(config.JWT_PRIVATE_JWK),
+  provider: new HttpPaymentProvider(config.FAKE_PSP_URL),
+  classify,
+  assistant,
+  model,
+  corsOrigins: config.CORS_ORIGIN ? [config.CORS_ORIGIN] : undefined,
+});
+
 await app.listen({ port: config.PORT, host: '0.0.0.0' });

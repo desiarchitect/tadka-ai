@@ -99,15 +99,20 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - `RUNBOOK.md` (how to run this branch, command by command, with install steps for Windows, macOS and Linux) and this changelog.
 - Windows support: file paths built with `fileURLToPath`, and `.gitattributes` keeps LF line endings.
 - PowerShell versions of the install check, Quick start, walkthrough, port cleanup and teardown, so Windows users can use PowerShell or Git Bash.
-- Tests: 69 (61 API, 8 fake provider). They include an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), the provider selection rules, and a boundary test.
+- Visual client (`apps/web`): React 19, Vite, TypeScript, and semantic CSS. Customer food-assistant view with demo banner and collapsible Developer Demonstration Panel displaying real OTel trace ID, request ID, latency, model metadata, and safe error codes.
+- CORS support on `apps/api` using `@fastify/cors` restricted to local development origins (`:5173`, `:4173`).
+- OpenTelemetry trace ID and request ID propagation on all API responses (`x-trace-id`, `x-request-id`).
+- Authenticated `POST /assist/triage` endpoint for the EP0 vertical slice, guarded by customer token verification and Zod validation.
+- ADR 0001 (`docs/adr/0001-ep0-visual-client-and-cors.md`) and independent review (`docs/reviews/EP0_INDEPENDENT_REVIEW.md`).
+- Tests: 78 (67 API, 8 fake provider, 3 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
 
 ### Fixed
 - The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
 
 ### Verified
-- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 69 of 69 tests.
-- The dry-run probe, and the refusals of `--live`: no credentials, an unrecognised Azure deployment name, and `LLM_PROVIDER=openai` before a price row exists.
-- The adapters through the real AI SDK providers against a stand-in for the network. A live call on either provider has not been run from this repository yet.
+- On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, build, and 78 of 78 tests.
+- The dry-run probe, and the live call to Microsoft Foundry `gpt-5.4-mini`.
+- The adapters through the real AI SDK providers against a stand-in for the network.
 
 ### Not in this branch
 - Chat, tools, RAG, the agent loop and refunds. They arrive in later episode branches.

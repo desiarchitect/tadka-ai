@@ -27,6 +27,9 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - PowerShell versions of the install check, Quick start, walkthrough, port cleanup and teardown, so Windows users can use PowerShell or Git Bash.
 - Tests: 41 (33 API, 8 fake provider).
 
+### Fixed
+- The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
+
 ### Verified
 - On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, and 41 of 41 tests.
 - The dry-run probe, and the refusal to run `--live` without credentials.

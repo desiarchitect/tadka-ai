@@ -16,7 +16,8 @@ exactly as it is at the end of that episode, and `git diff ep01-...ep02-...` sho
 | `ep00-start` | Baseline app (orders, auth, fake payment provider) plus one structured LLM call | in progress |
 | `ep01-structured-intent` | Deterministic order-status route, plus an LLM that only classifies free text into five labels, measured against keyword rules | in progress |
 | `ep02-typed-tool-calling` | Three read-only tools with identity from the token, an agent loop with hard limits and a spending guard, replies rendered from tool results | in progress |
-| `ep03-...` to `ep12-...` | AI features, evals, safety, operations | not started |
+| `ep03-conversation-memory` | Conversations stored in Postgres and owned by the customer, history trimmed by whole turns within a byte budget, and an opt-in vegetarian preference applied by the app | in progress |
+| `ep04-...` to `ep12-...` | AI features, evals, safety, operations | not started |
 
 Branch names are `epNN-short-topic`. A branch is added only when the episode's code and tests pass.
 

@@ -18,7 +18,7 @@ What you will see when it runs:
 | A React + Vite customer-facing visual client with developer telemetry panel | `http://localhost:5173` |
 | A fake payment provider you can make succeed, decline, time out or fail on demand | `http://localhost:4010` |
 | One request traced across services | Jaeger at `http://localhost:16686` |
-| 173 passing tests (130 API + 13 fake provider + 30 web client) | `pnpm test` |
+| 202 passing tests (154 API + 13 fake provider + 35 web client) | `pnpm test` |
 | One typed answer from a language model, from Microsoft Foundry or direct OpenAI | `pnpm probe:llm` (section 9) |
 
 What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, refunds. Those arrive in later episode branches.
@@ -475,7 +475,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 130 API tests and 30 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 154 API tests and 35 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -488,12 +488,14 @@ Expected: 13 fake-provider tests, 130 API tests and 30 web tests pass. Your dev 
 | `llm-contract.test.ts` (16) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
 | `llm-boundary.test.ts` (6) | Only `src/llm` imports a vendor SDK, builds a provider client or builds provider option objects; scripts get their model from the same factory |
 | `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
+| `guard.test.ts` (7) | The shared guard for model-spending routes on a bare app: 401/403 never use quota, the limit is per verified user, each route has its own quota, Retry-After, the timeout signal |
+| `provider-mode.test.ts` (5) | The startup decision: demo never initialises the provider, live, off, and a chosen-but-incomplete provider is refused |
 | `assist-errors.test.ts` (15) | Provider failures (401, 403, 429, 500, 404, network, 504, bad output) become our own status and code; provider text, keys, resource names and the customer's message never reach the response or the log; a provider auth failure is not a 401; a hung call is cut off at the timeout and the model sees the abort |
-| `assist-access.test.ts` (14) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
-| `startup.test.ts` (8) | The real server process: no provider and no demo mode is `503 provider_not_configured`; `DEMO_MODE=1` is `simulated: true`; a bad `DEMO_MODE` refuses to start |
+| `assist-access.test.ts` (15) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
+| `startup.test.ts` (19) | The real server process, started with the command from `package.json`: from the parsed `.env.example` as copied (model off, honest 503), with `DEMO_MODE=1`, with a half-filled provider in demo mode (still starts), and the live refusals (provider chosen without its key, unknown provider, bad deployment name, bad numeric setting): exit code 1, one line, no stack trace, no credential value |
 | `shutdown.test.ts` (20) | The shutdown sequence (order, a failing stage, a hang in each stage position, a stage finishing after the deadline, repeated signals, the root `--no-bail` setting) and the real process with telemetry off, on and refused, with a server close stuck on an unfinished request, and with a trace backend that never answers |
 | `fake-psp/test/shutdown.test.ts` (5) | The same shutdown contract for the fake provider |
-| `web/test/*.test.ts(x)` (30) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
+| `web/test/*.test.ts(x)` (35) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
 ## 9. The LLM probe

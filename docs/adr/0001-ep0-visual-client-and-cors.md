@@ -75,3 +75,9 @@ The first implementation of this ADR differed from it in places. These are the c
 8. **Demo credentials are build-time opt-in.** The seed accounts and password are compiled in only with `VITE_DEMO_LOGIN=1` (`pnpm dev` sets it; a production build does not), and `pnpm --filter @tadka/web check:bundle` checks the bundle both ways.
 9. **Trace IDs.** The API returns `x-trace-id` and `x-request-id` in responses. The browser does not send a trace context, so this is not end-to-end propagation from the browser.
 10. **`/health` is liveness only.** It does not check Postgres or the provider.
+
+### Amendments after the end-to-end review
+
+11. **Startup is explicit.** `DEMO_MODE`, `LLM_PROVIDER` and the provider credentials are decided once at startup (`src/assist/provider-mode.ts`). Demo never reads provider settings; a chosen-but-incomplete provider refuses to start with one line; an unset provider is "off". The `.env.example` template leaves `LLM_PROVIDER` empty so a fresh checkout starts.
+12. **One guard for model-spending routes** (`src/assist/guard.ts`): customer check, per-user limit (own quota per route), provider timeout.
+13. **Production builds need `VITE_API_URL`.** The localhost default is dev-only and is not in production bundles; a build without the address says so and sends nothing.

@@ -33,7 +33,7 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - OpenTelemetry trace ID and request ID propagation on all API responses (`x-trace-id`, `x-request-id`).
 - Authenticated `POST /assist/triage` endpoint for the EP0 vertical slice, guarded by customer token verification and Zod validation.
 - ADR 0001 (`docs/adr/0001-ep0-visual-client-and-cors.md`) and independent review (`docs/reviews/EP0_INDEPENDENT_REVIEW.md`).
-- Tests: 173 (130 API, 13 fake provider, 30 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
+- Tests: 202 (154 API, 13 fake provider, 35 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
 
 ### Changed (EP-0 remediation after the independent audit)
 - **No silent mock.** Without a provider, `POST /assist/triage` is `503 provider_not_configured`. `DEMO_MODE=1` (only `1` or `0`; empty is off; anything else refuses to start) returns answers marked `simulated: true` with `modelId: "demo-mock"`, and the client shows a SIMULATED badge. Every response now has an explicit `simulated` boolean. The hard-coded `gpt-5.4-mini` model name in the response is gone: it reports what the provider returned.
@@ -45,6 +45,14 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - **Client**: responses are validated with zod; one request helper replaces the duplicated fetch code; error wording is the client's own per error code; the demo sign-in and its credentials exist only in a build made with `VITE_DEMO_LOGIN=1` (`pnpm dev` sets it).
 - **CI**: Node 24 and 26 matrix; adds `pnpm build` and the bundle check (`pnpm --filter @tadka/web check:bundle`).
 - Docs: RUNBOOK, README, `.env.example`, `apps/web/.env.example`, ADR 0001 section 6; the earlier in-repo review is marked historical.
+
+### Changed (EP-0 remediation, round 2: independent end-to-end review)
+- **Startup.** `.env.example` ships `LLM_PROVIDER` empty. The API decides once whether it is in demo, live or off mode (`src/assist/provider-mode.ts`): demo mode never reads provider settings, a provider that is chosen but incomplete (or unknown) is refused with one `Startup refused: ...` line and exit code 1 (no stack trace, no credential value), and nothing configured is a legitimate "model off" state. A present-but-empty setting takes its default and is never turned into 0. Tests start the real process from the parsed `.env.example`.
+- **Shared guard** (`src/assist/guard.ts`): the customer check, per-user limiter and provider timeout signal moved out of the triage route so another route can reuse them. No behaviour change for triage. Each route has its own per-user quota.
+- **Web client.** The developer panel no longer clips on phones (an inline `span 2` forced a second grid column); muted text colours meet WCAG AA; the diagnostics toggle is one native button; the page has a `<main>` landmark and a favicon. A production build requires `VITE_API_URL` (the localhost default is dev-only and is removed from production bundles); without it the page says what to set and sends nothing. The bundle check also asserts that.
+
+### Fixed (EP-0 remediation, round 2)
+- **`cp .env.example .env` and starting the API crashed** (an uncaught `LlmConfigError`), because the template chose `LLM_PROVIDER=azure` with blank credentials. This was in the baseline before the first remediation and was found by the independent review.
 
 ### Fixed (EP-0 remediation)
 - **The API and the fake provider did not exit on SIGTERM when tracing was on**, because the bare `SIGTERM` handler in `instrument.ts` replaced Node's default. Both now run one bounded shutdown for SIGTERM and SIGINT: stop the server, close the database (API), flush traces (3 s limit), exit; 8 s overall deadline, forced exit code 1 after it, whichever step hangs (tested for a stuck server close, a stuck stage in each position, and a trace backend that never answers); a repeated signal does not start a second shutdown. A request still running at the deadline is abandoned.

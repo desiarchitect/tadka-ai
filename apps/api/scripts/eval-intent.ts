@@ -2,10 +2,9 @@
 //   pnpm eval:intent          dry run: the "LLM" is a FAKE model that repeats the rules'
 //                             answer. This checks the harness only. Its accuracy says
 //                             nothing about a real model.
-//   pnpm eval:intent --live   the real Foundry deployment, one request per message, under
+//   pnpm eval:intent --live   the real model (LLM_PROVIDER), one request per message, under
 //                             a run budget and the shared ledger. Stops before sending a
 //                             request that could cross a limit; never retries.
-import { createAzure } from '@ai-sdk/azure';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +13,8 @@ import { BudgetLedger } from '../src/assist/budget.js';
 import { classifyIntent, type ClassifyResult } from '../src/assist/classifier.js';
 import { EvalBudget, runEval, summarize, type EvalMessage } from '../src/assist/eval.js';
 import { classifyWithRules } from '../src/assist/intent.js';
+import { LlmConfigError, createModelHandle, formatMeta } from '../src/llm/index.js';
 
-const MODEL = 'gpt-5.4-mini' as const; // the model priced in the ledger
 const live = process.argv.includes('--live');
 const evalPath = fileURLToPath(new URL('../eval/intents.eval.json', import.meta.url));
 const raw = readFileSync(evalPath, 'utf8');
@@ -30,20 +29,28 @@ const fakeModelFor = (text: string) => new MockLanguageModelV4({
 
 let llmClassify: (text: string) => Promise<ClassifyResult>;
 let budget: EvalBudget | undefined;
-let deployment = 'fake model (dry run)';
+let modelLabel = 'fake model (dry run)';
+let pricedAs = 'none (dry run)';
 if (!live) {
-  llmClassify = (text) => classifyIntent(fakeModelFor(text), text);
+  llmClassify = (text) => classifyIntent({ model: fakeModelFor(text), providerOptions: {} }, text);
 } else {
-  if (!process.env.AZURE_API_KEY || !process.env.AZURE_RESOURCE_NAME) {
-    console.error('AZURE_API_KEY and AZURE_RESOURCE_NAME must be set in .env (never commit it) to use --live.');
+  let setup: ReturnType<typeof createModelHandle>;
+  try { setup = createModelHandle(); } catch (e) {
+    if (!(e instanceof LlmConfigError)) throw e;
+    console.error(`${e.message.replace(/\.$/, '')}. Put the settings in .env (never commit it) to use --live.`);
     process.exit(1);
   }
-  deployment = process.env.AZURE_DEPLOYMENT || MODEL;
-  const azure = createAzure({ resourceName: process.env.AZURE_RESOURCE_NAME, apiKey: process.env.AZURE_API_KEY });
-  const model = azure(deployment);
-  llmClassify = (text) => classifyIntent(model, text);
+  if (setup.status === 'off') {
+    console.error(`--live needs a provider: ${setup.reason}. Put the settings in .env (never commit it).`);
+    process.exit(1);
+  }
+  for (const w of setup.warnings) console.warn(`warning: ${w}`);
+  const { handle } = setup;
+  modelLabel = formatMeta(handle.meta);
+  pricedAs = handle.priceKey;
+  llmClassify = (text) => classifyIntent(handle, text);
   const ledger = new BudgetLedger(fileURLToPath(new URL('../../../.m0-usage.json', import.meta.url)), Number(process.env.M0_BUDGET_USD ?? 5));
-  budget = new EvalBudget(Number(process.env.EVAL_BUDGET_USD ?? 0.5), MODEL, ledger);
+  budget = new EvalBudget(Number(process.env.EVAL_BUDGET_USD ?? 0.5), handle.priceKey, ledger);
   console.log(`budget: run cap $${process.env.EVAL_BUDGET_USD ?? 0.5}, ledger cap $${process.env.M0_BUDGET_USD ?? 5}, spent so far $${ledger.spent().toFixed(6)}`);
 }
 
@@ -66,5 +73,5 @@ if (llm.outcomes.budget_stop) console.log(`\nSTOPPED by the budget guard: ${llm.
 
 mkdirSync(fileURLToPath(new URL('../../../.eval-runs/', import.meta.url)), { recursive: true });
 const out = fileURLToPath(new URL(`../../../.eval-runs/${new Date().toISOString().replace(/[:.]/g, '-')}-${live ? 'live' : 'dry'}.json`, import.meta.url));
-writeFileSync(out, JSON.stringify({ mode: live ? 'live' : 'dry-run', deployment, pricedAs: MODEL, node: process.version, dataset: { version: dataset.version, sha: datasetSha }, rules, llm, rows: llmRows }, null, 2));
+writeFileSync(out, JSON.stringify({ mode: live ? 'live' : 'dry-run', model: modelLabel, pricedAs, node: process.version, dataset: { version: dataset.version, sha: datasetSha }, rules, llm, rows: llmRows }, null, 2));
 console.log(`\nfull results: ${out}`);

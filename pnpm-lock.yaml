@@ -171,6 +171,9 @@ importers:
       '@ai-sdk/azure':
         specifier: 4.0.99
         version: 4.0.99(zod@4.6.5)
+      '@ai-sdk/openai':
+        specifier: 4.0.91
+        version: 4.0.91(zod@4.6.5)
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1

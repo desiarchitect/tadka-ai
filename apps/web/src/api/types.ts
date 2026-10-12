@@ -1,10 +1,14 @@
 import type { z } from 'zod';
-import type { LoginResponseSchema, TriageResponseSchema } from './schema.js';
+import type { LoginResponseSchema, MenuSchema, OrderDetailSchema, OrderSchema, RestaurantSchema, TriageResponseSchema } from './schema.js';
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;
 export type TriageOutput = TriageResponse['output'];
 export type TriageIntent = TriageOutput['intent'];
 export type TriageLanguage = TriageOutput['language'];
+export type Restaurant = z.infer<typeof RestaurantSchema>;
+export type Menu = z.infer<typeof MenuSchema>;
+export type Order = z.infer<typeof OrderSchema>;
+export type OrderDetail = z.infer<typeof OrderDetailSchema>;
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
 export type ApiDiagnostics = {

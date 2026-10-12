@@ -23,3 +23,31 @@ export const TriageResponseSchema = z.object({
 });
 
 export const ErrorBodySchema = z.object({ error: z.string() });
+
+// ---- Product data (restaurants, menus, orders). Only the fields the API really sends; nothing is invented. ----
+export const ORDER_STATUSES = ['Placed', 'Confirmed', 'Preparing', 'OutForDelivery', 'Delivered', 'Cancelled'] as const;
+
+export const RestaurantSchema = z.object({ id: z.string(), name: z.string(), city: z.string() });
+export const RestaurantListSchema = z.array(RestaurantSchema);
+export const MenuSchema = z.object({
+  restaurant: RestaurantSchema,
+  items: z.array(z.object({ id: z.string(), restaurantId: z.string(), name: z.string(), pricePaise: z.number().int() })),
+});
+
+export const OrderSchema = z.object({
+  id: z.string(),
+  restaurantId: z.string(),
+  status: z.enum(ORDER_STATUSES),
+  totalPaise: z.number().int(),
+  version: z.number().int(),
+  createdAt: z.string(),
+  deliveryAddress: z.string().nullish(),
+  contactPhone: z.string().nullish(),
+});
+export const OrderListSchema = z.array(OrderSchema);
+export const OrderDetailSchema = OrderSchema.extend({
+  items: z.array(z.object({ id: z.string(), name: z.string(), unitPricePaise: z.number().int(), quantity: z.number().int() })),
+});
+
+/** POST /auth/logout answers 204 with no body. */
+export const NoContentSchema = z.null();

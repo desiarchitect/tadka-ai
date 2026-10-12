@@ -101,6 +101,75 @@ describe('ApiClient', () => {
   });
 });
 
+describe('ApiClient product calls', () => {
+  const order = { id: 'o1', restaurantId: 'r1', status: 'Placed', totalPaise: 100, version: 1, createdAt: '2026-10-01T00:00:00Z' };
+
+  it('GET calls send no body and no Content-Type; the token goes in the Authorization header', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, []));
+    globalThis.fetch = f;
+    await new ApiClient('http://x').orders('tok');
+    await new ApiClient('http://x').restaurants();
+    const [url, init] = f.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('http://x/orders');
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+    expect(init.headers).toEqual({ Authorization: 'Bearer tok' });
+    expect((f.mock.calls[1]![1] as RequestInit).headers).toEqual({});
+  });
+
+  it('ids are encoded into the path, so an odd id cannot change which route is called', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, { ...order, items: [] }));
+    globalThis.fetch = f;
+    await new ApiClient('http://x').order('a/../b?x=1', 'tok');
+    expect(f.mock.calls[0]![0]).toBe('http://x/orders/a%2F..%2Fb%3Fx%3D1');
+  });
+
+  it('responses are validated: an order with an unknown status, or a list that is not a list, is invalid_response', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, [{ ...order, status: 'Teleported' }]));
+    expect((await failure(new ApiClient('http://x').orders('t')))?.diagnostics.errorCode).toBe('invalid_response');
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { not: 'a list' }));
+    expect((await failure(new ApiClient('http://x').restaurants()))?.diagnostics.errorCode).toBe('invalid_response');
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { restaurant: { id: 'r', name: 'n', city: 'c' }, items: [{ id: 'i', restaurantId: 'r', name: 'x', pricePaise: 1.5 }] }));
+    expect((await failure(new ApiClient('http://x').menu('r')))?.diagnostics.errorCode).toBe('invalid_response');
+  });
+
+  it('unknown extra fields are dropped, nothing is invented: the menu has name and price only', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { restaurant: { id: 'r', name: 'n', city: 'c' }, items: [{ id: 'i', restaurantId: 'r', name: 'x', pricePaise: 100, vegetarian: true }] }));
+    const out = await new ApiClient('http://x').menu('r');
+    expect(Object.keys(out.data.items[0]!).sort()).toEqual(['id', 'name', 'pricePaise', 'restaurantId']);
+  });
+
+  it.each([
+    [409, 'order_is_Preparing', /now Preparing and can no longer be paid/],
+    [409, 'cannot_move_Delivered_to_Confirmed', /now Delivered/],
+    [409, 'order_changed_concurrently', /changed while you were paying/],
+    [402, 'payment_declined', /declined\. You were not charged/],
+    [502, 'payment_outcome_unknown', /could not confirm the payment/],
+    [404, 'order_not_found', /could not be found/],
+    [401, 'invalid_token', /session has ended/],
+  ])('pay: %i %s has its own wording', async (status, code, message) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(status, { error: code }, false));
+    const err = await failure(new ApiClient('http://x').pay('o1', 'tok'));
+    expect(err?.message).toMatch(message);
+    expect(err?.message).not.toContain(code);
+    expect(err?.diagnostics.httpStatus).toBe(status);
+  });
+
+  it('pay sends a POST with the token to the order\'s pay path', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, { ...order, status: 'Confirmed' }));
+    globalThis.fetch = f;
+    const out = await new ApiClient('http://x').pay('o1', 'tok');
+    expect(out.data.status).toBe('Confirmed');
+    expect(f.mock.calls[0]![0]).toBe('http://x/orders/o1/pay');
+    expect((f.mock.calls[0]![1] as RequestInit).method).toBe('POST');
+  });
+
+  it('logout accepts the 204 with no body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', headers: new Headers(), json: async () => { throw new SyntaxError('empty'); } });
+    await expect(new ApiClient('http://x').logout('refresh')).resolves.toMatchObject({ data: null });
+  });
+});
+
 describe('which API address a build uses', () => {
   it('uses VITE_API_URL when it is set, in development and in production', () => {
     expect(resolveApiBaseUrl({ VITE_API_URL: 'https://api.example.com', DEV: false })).toBe('https://api.example.com');

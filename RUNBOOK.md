@@ -26,7 +26,7 @@ What you will see when it runs:
 | One typed answer from a language model, from Microsoft Foundry or the direct OpenAI API | `pnpm probe:llm` (section 10) |
 | A deterministic order-status route and a free-text intent route | Section 6 |
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
-| 335 passing tests (230 API + 13 fake provider + 92 web client) | `pnpm test` |
+| 337 passing tests (230 API + 13 fake provider + 94 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: tools, the agent loop, conversations, RAG, refunds, any action taken from a message. Those arrive in later episode branches.
 
@@ -628,7 +628,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 230 API tests and 92 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 230 API tests and 94 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|

@@ -103,7 +103,7 @@ export class ApiClient {
   }
 
   login(email: string, password: string, signal?: AbortSignal): Promise<Result<LoginResponse>> {
-    return this.post({ path: '/auth/login', body: { email, password }, signal, schema: LoginResponseSchema, describe: loginMessage });
+    return this.post({ path: '/auth/login', body: { email, password }, signal, schema: LoginResponseSchema, describe: loginMessage, onSuccess: () => ({ modelInvolved: false }) });
   }
 
   triage(message: string, accessToken: string | null, signal?: AbortSignal): Promise<Result<TriageResponse>> {
@@ -123,7 +123,8 @@ export class ApiClient {
   intent(text: string, accessToken: string | null, signal?: AbortSignal): Promise<Result<IntentResponse>> {
     return this.send({
       path: '/assist/intent', body: { text }, token: accessToken, signal, schema: IntentResponseSchema, describe: intentMessage,
-      onSuccess: (data) => ({ simulated: data.simulated }),
+      // The keyword rules involve no model; the language-model classifier does, but this endpoint does not say which model.
+      onSuccess: (data) => ({ simulated: data.simulated, modelInvolved: data.classifier === 'llm' }),
     });
   }
 

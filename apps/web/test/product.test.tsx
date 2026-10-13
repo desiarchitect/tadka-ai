@@ -119,6 +119,15 @@ describe('diagnostics wording', () => {
     expect(screen.getByText('No model involved in this request')).toBeInTheDocument();
     expect(screen.queryByText('Unavailable on failed request')).not.toBeInTheDocument();
   });
+
+  it('a call that may involve a model but does not say which (triage without a model id) never claims "no model involved"', async () => {
+    globalThis.fetch = api({ 'POST /assist/triage': () => reply(200, { output: { intent: 'other', language: 'en', needsHuman: false, summary: 's' }, simulated: false, modelId: 'gpt-x' }) });
+    render(<App />);
+    await screen.findByText('₹299.00');
+    fireEvent.click(screen.getByRole('button', { name: /Submit to Assistant/i }));
+    await screen.findByText('gpt-x');
+    expect(screen.queryByText('No model involved in this request')).not.toBeInTheDocument();
+  });
 });
 
 describe('session expiry', () => {

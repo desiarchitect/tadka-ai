@@ -79,7 +79,7 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ diagnostics }) =
                         {diagnostics.simulated ? ' (simulated)' : ''}
                       </>
                     ) : (
-                      <span className="na">{diagnostics.outcome === 'success' ? 'No model involved in this request' : 'Unavailable on failed request'}</span>
+                      <span className="na">{diagnostics.outcome !== 'success' ? 'Unavailable on failed request' : diagnostics.modelInvolved === false ? 'No model involved in this request' : 'Not reported by this endpoint'}</span>
                     )}
                   </span>
                 </div>
@@ -91,7 +91,7 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ diagnostics }) =
                     {diagnostics.tokenUsage ? (
                       `${diagnostics.tokenUsage.inputTokens ?? 0} in / ${diagnostics.tokenUsage.outputTokens ?? 0} out`
                     ) : (
-                      <span className="na">{diagnostics.outcome === 'success' && !diagnostics.modelId ? 'None (no model involved)' : 'None / Not reported'}</span>
+                      <span className="na">{diagnostics.outcome === 'success' && diagnostics.modelInvolved === false ? 'None (no model involved)' : 'None / Not reported'}</span>
                     )}
                   </span>
                 </div>

@@ -34,8 +34,10 @@ export class OrdersService {
   }
 
   get(p: Principal, orderId: string) {
-    return inSpan('orders.get', { 'tadka.order_id': orderId }, async () => {
+    // The order id goes on the span only after the order was found for this caller: a foreign or invented id is never recorded.
+    return inSpan('orders.get', {}, async (span) => {
       const o = await this.findVisible(p, orderId);
+      span.setAttribute('tadka.order_id', o.id);
       const items = await this.db.select().from(orderItems).where(eq(orderItems.orderId, o.id));
       return { ...view(p, o), items };
     });
@@ -44,8 +46,9 @@ export class OrdersService {
   // Charge a Placed order and confirm it. Safe to repeat: the payment uses a stable
   // provider key per order, and an already-confirmed order just reports its state.
   pay(p: Principal, orderId: string) {
-    return inSpan('orders.pay', { 'tadka.order_id': orderId }, async () => {
+    return inSpan('orders.pay', {}, async (span) => {
       const o = await this.findVisible(p, orderId);
+      span.setAttribute('tadka.order_id', o.id);
       if (o.status !== 'Placed') {
         if (o.status === 'Confirmed') return view(p, o);
         throw new ConflictError(`order_is_${o.status}`);

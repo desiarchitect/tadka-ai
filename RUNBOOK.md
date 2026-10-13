@@ -26,7 +26,7 @@ What you will see when it runs:
 | One typed answer from a language model, from Microsoft Foundry or the direct OpenAI API | `pnpm probe:llm` (section 10) |
 | A deterministic order-status route and a free-text intent route | Section 6 |
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
-| 337 passing tests (230 API + 13 fake provider + 94 web client) | `pnpm test` |
+| 340 passing tests (233 API + 13 fake provider + 94 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: tools, the agent loop, conversations, RAG, refunds, any action taken from a message. Those arrive in later episode branches.
 
@@ -628,7 +628,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 230 API tests and 94 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 233 API tests and 94 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -649,6 +649,7 @@ Expected: 13 fake-provider tests, 230 API tests and 94 web tests pass. Your dev 
 | `intent-startup.test.ts` (4) | The real process and `/assist/intent`: with a provider that RECORDS requests, demo mode with credentials makes zero provider calls (and a control shows the recorder catches a call outside demo mode); the template as copied answers from the keyword rules; a half-chosen provider still refuses to start |
 | `boundaries.test.ts` (4) | `assist` imports only the public orders service, and the model output has no field that can name a user |
 | `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
+| `trace-order-ids.test.ts` (3) | A trace records an order id only for an order the caller owns: a foreign or invented id is never on a span, the two cases leave the same trace, and paying someone else's order records nothing |
 | `guard.test.ts` (7) | The shared guard for model-spending routes on a bare app: 401/403 never use quota, the limit is per verified user, each route has its own quota, Retry-After, the timeout signal |
 | `provider-mode.test.ts` (5) | The startup decision: demo never initialises the provider, live, off, and a chosen-but-incomplete provider is refused |
 | `assist-errors.test.ts` (15) | Provider failures (401, 403, 429, 500, 404, network, 504, bad output) become our own status and code; provider text, keys, resource names and the customer's message never reach the response or the log; a provider auth failure is not a 401; a hung call is cut off at the timeout and the model sees the abort |
@@ -836,7 +837,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | The page says "Not signed in. The demo sign-in is switched off" | The client was built without `VITE_DEMO_LOGIN=1` (a production build) | Use `pnpm dev`, or build with `VITE_DEMO_LOGIN=1` |
 | The page says "This build has no API address" | A production build was made without `VITE_API_URL` | Rebuild with `VITE_API_URL` set to the API's address (for local use `http://localhost:3000`) |
 | `DEMO_MODE must be "1" or "0"` at start | `DEMO_MODE` has another value (`true`, `yes`) | Use `1`, `0` or leave it empty |
-| `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds |
+| `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds (the header is exposed to browsers through CORS, so the page shows it) |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |
 
 ## 12. Teardown

@@ -53,7 +53,7 @@ Episode 2: typed tool calling with server-side identity. Starts from `ep01-struc
 - The product UI from `ep01-product-ui` (orders, order details, restaurants and menus, payment, email/password sign-in, the EP-1 intent card and order-status lookup) is merged in.
 - An **Ask about your orders** card for `POST /assist/chat`: the question goes out as `{ text }` with the token and nothing else (no user id, order id or role; the server authorizes). It shows the answer (written by the server from tool results) apart from the tools that ran and how each ended. It does not show tool arguments or results because the API does not send them. A non-2xx is a failed turn: the page's own wording for each error code, with the tools that ran and the fixed fallback sentence labelled "not an answer"; `Retry-After` is used for 429. Responses are validated with zod. Cancel aborts the request (the server then abandons the turn). Switching customer aborts a question in flight and a late answer is ignored.
 - The capability list shows EP-0, EP-1 and EP-2 as available.
-- Tests: 497 (356 API, 13 fake provider, 128 web client).
+- Tests: 500 (356 API, 13 fake provider, 131 web client).
 
 ### Not verified (still open)
 - No live Foundry call has been made for this branch. The scripted provider proves server behaviour for failures; it is not evidence of live-model behaviour.
@@ -78,7 +78,7 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed. The worst case estimates input tokens as the UTF-8 byte length of the prompt (a conservative estimate that does not undercount Devanagari, not a guaranteed bound), adds a fixed overhead and the full output cap, prices input and output separately, and refuses a model with no configured price.
 - `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
 - Client (`apps/web`, no backend change): an **Intent classification** card for `POST /assist/intent` that shows the classification (label, and whether it came from the language model or the keyword rules; SIMULATED in demo mode) apart from the **next step** the server's code chose, with an explicit "classification only, does not read your orders" label and no confidence score (the API sends none). A **Check status (server lookup)** button on each order calls `GET /assist/order-status` and labels the answer as a direct lookup with no model. Responses are validated with zod. The capability list shows EP-1 as available. The product UI from `ep00-product-ui` (orders, details, menus, payment, sign-in) is carried in.
-- Tests: 335 (230 API, 13 fake provider, 92 web client).
+- Tests: 337 (230 API, 13 fake provider, 94 web client).
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
@@ -140,7 +140,7 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - Authenticated `POST /assist/triage` endpoint for the EP0 vertical slice, guarded by customer token verification and Zod validation.
 - ADR 0001 (`docs/adr/0001-ep0-visual-client-and-cors.md`) and independent review (`docs/reviews/EP0_INDEPENDENT_REVIEW.md`).
 - Product UI in `apps/web` (no backend change): orders list and order detail, restaurant list and menus (name and price only), paying a `Placed` order, a real email/password sign-in beside the demo sign-in, and a capability list saying what the assistant can do in this build. Customer switching aborts requests in flight and clears all customer-scoped state first; a 401 from any data call ends the session. Responses from every new call are validated with zod.
-- Tests: 239 (154 API, 13 fake provider, 72 web: the visual client tests plus the product UI tests). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
+- Tests: 240 (154 API, 13 fake provider, 73 web: the visual client tests plus the product UI tests). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
 
 ### Changed (EP-0 remediation after the independent audit)
 - **No silent mock.** Without a provider, `POST /assist/triage` is `503 provider_not_configured`. `DEMO_MODE=1` (only `1` or `0`; empty is off; anything else refuses to start) returns answers marked `simulated: true` with `modelId: "demo-mock"`, and the client shows a SIMULATED badge. Every response now has an explicit `simulated` boolean. The hard-coded `gpt-5.4-mini` model name in the response is gone: it reports what the provider returned.

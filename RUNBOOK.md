@@ -29,7 +29,7 @@ What you will see when it runs:
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
 | The naive tool leaking another customer's address, and the fix | Section 7 |
 | `POST /assist/chat`: a question answered with tools | Section 7 |
-| 497 passing tests (356 API + 13 fake provider + 128 web client) | `pnpm test` |
+| 500 passing tests (356 API + 13 fake provider + 131 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: conversations (each question stands alone), tools that change anything,
 RAG, and defences against prompt injection beyond labelling database text as data. Those arrive in later episode branches.
@@ -855,7 +855,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 356 API tests and 128 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 356 API tests and 131 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|

@@ -53,6 +53,15 @@ describe('EP-2 tool-calling card', () => {
     expect(region.textContent).not.toMatch(/arguments|orderId|userId/); // the API sends no tool arguments, so none are shown
   });
 
+  it('the developer panel does not say "no model involved" for a question a model answered, and says the model is not reported', async () => {
+    globalThis.fetch = api({ 'POST /assist/chat': () => reply(200, ANSWER) });
+    render(<App />);
+    await ready(); ask();
+    await screen.findByRole('region', { name: 'Assistant answer' });
+    expect(screen.queryByText('No model involved in this request')).not.toBeInTheDocument();
+    expect(screen.getByText('Not reported by this endpoint')).toBeInTheDocument();
+  });
+
   it('shows a not-found step as what it is, without treating it as an error (ownership is the server\'s call)', async () => {
     globalThis.fetch = api({ 'POST /assist/chat': () => reply(200, { answer: "I couldn't find that order.", stopReason: 'answered', steps: [{ tool: 'get_order', status: 'not_found' }] }) });
     render(<App />);

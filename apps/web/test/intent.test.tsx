@@ -118,6 +118,23 @@ describe('EP-1 intent card', () => {
   });
 });
 
+describe('EP-1 developer panel does not misstate whether a model was involved', () => {
+  it('rules: "No model involved"; language model: "Not reported by this endpoint" (never a claim that no model was used)', async () => {
+    globalThis.fetch = api({ 'POST /assist/intent': () => reply(200, intentBody({ classifier: 'llm' })) });
+    render(<App />);
+    await ready(); classify();
+    await screen.findByRole('region', { name: 'Intent classification result' });
+    expect(screen.getByText('Not reported by this endpoint')).toBeInTheDocument();
+    expect(screen.queryByText('No model involved in this request')).not.toBeInTheDocument();
+    cleanup();
+    globalThis.fetch = api({ 'POST /assist/intent': () => reply(200, intentBody({ classifier: 'rules' })) });
+    render(<App />);
+    await ready(); classify();
+    await screen.findByRole('region', { name: 'Intent classification result' });
+    expect(screen.getByText('No model involved in this request')).toBeInTheDocument();
+  });
+});
+
 describe('EP-1 direct order-status lookup (no model)', () => {
   it('asks the server for that order and labels the answer as a direct lookup, not an AI answer', async () => {
     const f = api({ 'GET /assist/order-status': () => reply(200, { orderId: PREP, status: 'Preparing' }) });

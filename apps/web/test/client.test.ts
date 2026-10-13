@@ -273,6 +273,54 @@ describe('ApiClient EP-2 chat', () => {
   });
 });
 
+describe('ApiClient EP-3 calls', () => {
+  const reply3 = { answer: 'a', stopReason: 'answered', steps: [], context: { turnsSent: 1, turnsDropped: 0, historyBytes: 10 } };
+
+  it('methods and bodies: PUT carries { value } as JSON, DELETE and GET carry no body and no Content-Type, 204 is accepted', async () => {
+    const f = vi.fn().mockResolvedValueOnce(res(200, { diet: 'vegetarian' })).mockResolvedValueOnce({ ok: true, status: 204, statusText: 'No Content', headers: new Headers(), json: async () => { throw new SyntaxError('empty'); } }).mockResolvedValue(res(200, []));
+    globalThis.fetch = f;
+    const c = new ApiClient('http://x');
+    await c.setVegetarian('tok'); await c.clearDiet('tok'); await c.conversations('tok');
+    const [put, del, get] = f.mock.calls.map((x) => x[1] as RequestInit);
+    expect(f.mock.calls[0]![0]).toBe('http://x/assist/memories/diet');
+    expect(put!.method).toBe('PUT'); expect(JSON.parse(String(put!.body))).toEqual({ value: 'vegetarian' }); expect((put!.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+    expect(del!.method).toBe('DELETE'); expect(del!.body).toBeUndefined(); expect((del!.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+    expect(get!.method).toBe('GET'); expect(get!.body).toBeUndefined();
+  });
+
+  it('a conversation id is encoded into the path', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, { conversationId: 'x', turns: [] }));
+    globalThis.fetch = f;
+    await new ApiClient('http://x').conversation('a/../b?x=1', 'tok');
+    expect(f.mock.calls[0]![0]).toBe('http://x/assist/conversations/a%2F..%2Fb%3Fx%3D1');
+  });
+
+  it('responses are validated: a preference other than vegetarian, a turn without text, a reply without context', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { diet: 'vegan' }));
+    expect((await failure(new ApiClient('http://x').prefs('t')))?.diagnostics.errorCode).toBe('invalid_response');
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { conversationId: 'c', turns: [{ turnNo: 1, answer: 'a', stopReason: 's', at: 'x' }] }));
+    expect((await failure(new ApiClient('http://x').conversation('c', 't')))?.diagnostics.errorCode).toBe('invalid_response');
+    globalThis.fetch = vi.fn().mockResolvedValue(res(200, { answer: 'a', stopReason: 'answered', steps: [] }));
+    expect((await failure(new ApiClient('http://x').say('c', 'q', 't')))?.diagnostics.errorCode).toBe('invalid_response');
+  });
+
+  it('say() sends only { text }; a failed turn carries validated .failure with Retry-After; the chat wording covers the conversation codes', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, reply3));
+    globalThis.fetch = f;
+    await new ApiClient('http://x').say('c1', 'hello', 'tok');
+    expect(JSON.parse(String((f.mock.calls[0]![1] as RequestInit).body))).toEqual({ text: 'hello' });
+    expect(f.mock.calls[0]![0]).toBe('http://x/assist/conversations/c1/messages');
+    globalThis.fetch = vi.fn().mockResolvedValue({ ...res(429, { error: 'rate_limited' }, false), headers: new Headers({ 'retry-after': '12' }) });
+    const err = (await failure(new ApiClient('http://x').say('c1', 'q', 't'))) as (Error & { diagnostics: ApiDiagnostics; failure?: { code: string; retryAfterSec?: number } }) | null;
+    expect(err?.failure).toMatchObject({ code: 'rate_limited', retryAfterSec: 12 });
+    for (const [code, re] of [['conversation_busy', /answered first/], ['conversation_full', /50 turns/], ['invalid_history', /no longer be continued/], ['conversation_not_found', /could not be found/]] as const) {
+      globalThis.fetch = vi.fn().mockResolvedValue(res(409, { error: code }, false));
+      const e = await failure(new ApiClient('http://x').say('c1', 'q', 't'));
+      expect(e?.message).toMatch(re); expect(e?.message).not.toContain(code);
+    }
+  });
+});
+
 describe('which API address a build uses', () => {
   it('uses VITE_API_URL when it is set, in development and in production', () => {
     expect(resolveApiBaseUrl({ VITE_API_URL: 'https://api.example.com', DEV: false })).toBe('https://api.example.com');

@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { ChatFailureBodySchema, ChatResponseSchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NextStepSchema, OrderStatusResponseSchema, OrderDetailSchema, OrderSchema, RestaurantSchema, TriageResponseSchema } from './schema.js';
+import type { ConversationHistorySchema, ConversationListSchema, ConversationReplySchema, PrefsSchema, ChatFailureBodySchema, ChatResponseSchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NextStepSchema, OrderStatusResponseSchema, OrderDetailSchema, OrderSchema, RestaurantSchema, TriageResponseSchema } from './schema.js';
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;
 export type TriageOutput = TriageResponse['output'];
@@ -8,6 +8,10 @@ export type TriageLanguage = TriageOutput['language'];
 export type IntentResponse = z.infer<typeof IntentResponseSchema>;
 export type NextStep = z.infer<typeof NextStepSchema>;
 export type OrderStatusResponse = z.infer<typeof OrderStatusResponseSchema>;
+export type ConversationSummary = z.infer<typeof ConversationListSchema>[number];
+export type ConversationHistory = z.infer<typeof ConversationHistorySchema>;
+export type ConversationReply = z.infer<typeof ConversationReplySchema>;
+export type Prefs = z.infer<typeof PrefsSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
 export type ChatStep = ChatResponse['steps'][number];
 /** What a failed chat turn leaves for the page (every field validated). */

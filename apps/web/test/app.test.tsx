@@ -33,6 +33,8 @@ const api = (routes: Routes = {}) => {
     if (key === 'GET /restaurants') return reply(200, RESTAURANTS);
     if (key === 'GET /orders') return reply(200, []);
     if (key === 'POST /auth/logout') return reply(204, null);
+    if (key === 'GET /assist/conversations') return reply(200, []);
+    if (key === 'GET /assist/memories') return reply(200, {});
     throw new Error(`unexpected request ${key}`);
   });
   return fn as unknown as typeof fn & typeof fetch;

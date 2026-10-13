@@ -19,6 +19,8 @@ function api(over: Record<string, Handler> = {}) {
     if (key === 'POST /auth/logout') return reply(204, null);
     if (key === 'GET /restaurants') return reply(200, [{ id: R1, name: 'Spice Garden', city: 'Pune' }]);
     if (key === 'GET /orders') return reply(200, ORDERS[tokenOf(init)] ?? []);
+    if (key === 'GET /assist/conversations') return reply(200, []);
+    if (key === 'GET /assist/memories') return reply(200, {});
     throw new Error(`unexpected request ${key}`);
   });
   return fn as unknown as typeof fn & typeof fetch;

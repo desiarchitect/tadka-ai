@@ -4,6 +4,7 @@ import type { ApiDiagnostics, ChatFailure, ChatResponse, IntentResponse, TriageR
 import { AuthStatus, type Identity } from './components/AuthStatus.js';
 import { Capabilities } from './components/Capabilities.js';
 import { ChatCard } from './components/ChatCard.js';
+import { ConversationCard } from './components/ConversationCard.js';
 import { CustomerView } from './components/CustomerView.js';
 import { DeveloperPanel } from './components/DeveloperPanel.js';
 import { IntentCard } from './components/IntentCard.js';
@@ -12,7 +13,7 @@ import { OrdersPanel } from './components/OrdersPanel.js';
 import { RestaurantsPanel } from './components/RestaurantsPanel.js';
 import { SideTabs } from './components/SideTabs.js';
 import { demoCredentials, demoLoginEnabled, type DemoUser } from './demo.js';
-import { HAS_INTENT, HAS_TOOLS } from './episode.js';
+import { HAS_CONVERSATIONS, HAS_INTENT, HAS_TOOLS } from './episode.js';
 import { useLoad } from './hooks/useLoad.js';
 
 export const NO_API_URL_MESSAGE = 'This build has no API address, so it cannot reach the server. Rebuild it with VITE_API_URL set, for example: VITE_API_URL=https://api.example.com pnpm --filter @tadka/web build';
@@ -231,6 +232,7 @@ export const App: React.FC = () => {
             onReset={handleReset}
             unavailableReason={!apiConfigured ? NO_API_URL_MESSAGE : session || demoLogin ? null : 'Sign in to use the assistant.'}
           />
+          {HAS_CONVERSATIONS && session && <ConversationCard key={session.id} token={session.token} onUnauthorized={onUnauthorized} onDiagnostics={setDiagnostics} />}
           {HAS_INTENT && (
             <IntentCard
               onSubmit={handleIntentSubmit}

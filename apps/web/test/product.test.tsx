@@ -42,6 +42,8 @@ function api(over: Record<string, Handler> = {}) {
     }
     const menu = /^GET \/restaurants\/(.+)\/menu$/.exec(key);
     if (menu) return reply(200, { restaurant: RESTAURANTS[0], items: [{ id: 'm1', restaurantId: menu[1], name: 'Butter Naan', pricePaise: 4900 }, { id: 'm2', restaurantId: menu[1], name: 'Dal Tadka', pricePaise: 18000 }] });
+    if (key === 'GET /assist/conversations') return reply(200, []);
+    if (key === 'GET /assist/memories') return reply(200, {});
     throw new Error(`unexpected request ${key}`);
   });
   return fn as unknown as typeof fn & typeof fetch;
@@ -281,8 +283,9 @@ describe('payment', () => {
 });
 
 describe('restaurants and menus', () => {
-  it('lists restaurants, opens a menu with real names and prices, and shows no dietary tags', async () => {
-    const f = api(); globalThis.fetch = f;
+  it('lists restaurants and opens a menu with real names and prices; a Vegetarian marker only where the API says isVeg: true', async () => {
+    const f = api({ 'GET /restaurants/*': () => reply(200, { restaurant: RESTAURANTS[0], items: [{ id: 'm1', restaurantId: R1, name: 'Butter Naan', pricePaise: 4900, isVeg: true }, { id: 'm2', restaurantId: R1, name: 'Dal Tadka', pricePaise: 18000 }, { id: 'm3', restaurantId: R1, name: 'Mystery', pricePaise: 100, isVeg: false }] }) });
+    globalThis.fetch = f;
     render(<App />);
     fireEvent.click(await screen.findByRole('tab', { name: 'Restaurants' }));
     fireEvent.click(await screen.findByRole('button', { name: /Show menu for Spice Garden/ }));
@@ -291,7 +294,8 @@ describe('restaurants and menus', () => {
     expect(within(menu).getByText('₹49.00')).toBeInTheDocument();
     expect(within(menu).getByText('₹180.00')).toBeInTheDocument();
     expect(calls(f)).toContain(`GET /restaurants/${R1}/menu`);
-    expect(screen.queryByText(/vegetarian|vegan|spicy|jain/i)).not.toBeInTheDocument();
+    expect(within(menu).getAllByText('Vegetarian')).toHaveLength(1); // only the dish the API marked; nothing is claimed about the others, not even "non-veg"
+    expect(within(menu).queryByText(/non-veg|vegan|spicy|jain/i)).not.toBeInTheDocument();
   });
 
   it('a menu error offers Retry', async () => {

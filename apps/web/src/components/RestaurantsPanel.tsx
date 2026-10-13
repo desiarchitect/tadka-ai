@@ -62,7 +62,7 @@ const Menu: React.FC<{ restaurantId: string; name: string }> = ({ restaurantId, 
   return (
     <ul className="menu-list" aria-label={`${name} menu`}>
       {state.data.items.map((i) => (
-        <li key={i.id}><span>{i.name}</span><span className="price">{rupees(i.pricePaise)}</span></li>
+        <li key={i.id}><span>{i.name}{i.isVeg === true && <span className="status status-Confirmed veg-badge">Vegetarian</span>}</span><span className="price">{rupees(i.pricePaise)}</span></li>
       ))}
     </ul>
   );

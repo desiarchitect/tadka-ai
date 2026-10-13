@@ -1,6 +1,6 @@
 import type { z } from 'zod';
-import { ChatFailureBodySchema, ChatResponseSchema, ErrorBodySchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, OrderStatusResponseSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
-import type { ApiDiagnostics, ChatFailure, ChatResponse, IntentResponse, LoginResponse, Menu, Order, OrderDetail, OrderStatusResponse, Restaurant, TriageResponse } from './types.js';
+import { ChatFailureBodySchema, ChatResponseSchema, ConversationCreatedSchema, ConversationHistorySchema, ConversationListSchema, ConversationReplySchema, PrefsSchema, ErrorBodySchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, OrderStatusResponseSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
+import type { ApiDiagnostics, ChatFailure, ChatResponse, ConversationHistory, ConversationReply, ConversationSummary, Prefs, IntentResponse, LoginResponse, Menu, Order, OrderDetail, OrderStatusResponse, Restaurant, TriageResponse } from './types.js';
 
 // Where the API is. VITE_API_URL is compiled into the bundle, so it must be set when a production build is made.
 // The localhost default exists only for local development (`vite`, the tests): a production build that was made
@@ -32,7 +32,7 @@ export const isCancelled = (err: unknown): err is RequestCancelledError => err i
 
 type Result<T> = { data: T; diagnostics: ApiDiagnostics };
 type Call<T> = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
   body?: unknown;
   token?: string | null;
@@ -113,6 +113,10 @@ const chatMessage = (status: number, code: string): string => {
     case 'provider_bad_output': case 'provider_refused': return 'The assistant could not produce a usable answer to that. Please rephrase, or check the Orders panel.';
     case 'budget_exhausted': return 'The assistant is paused by its spending guard. An operator has to look at it before it can answer again.';
     case 'backend_unavailable': return 'The assistant could not fetch your data right now. Please try again in a moment.';
+    case 'conversation_busy': return 'Another message in this conversation was answered first. Please send yours again.';
+    case 'conversation_full': return 'This conversation has reached its limit of 50 turns. Start a new conversation.';
+    case 'invalid_history': return 'This conversation can no longer be continued. Start a new conversation.';
+    case 'conversation_not_found': return 'That conversation could not be found.';
   }
   if (status >= 500) return 'Server error while answering.';
   return 'Request failed';
@@ -176,6 +180,49 @@ export class ApiClient {
     });
   }
 
+  /** EP-3. The server owns every conversation: another customer's id is a 404, exactly like an invented one. */
+  conversations(token: string, signal?: AbortSignal): Promise<Result<ConversationSummary[]>> {
+    return this.send({ method: 'GET', path: '/assist/conversations', token, signal, schema: ConversationListSchema, describe: chatMessage });
+  }
+
+  createConversation(token: string, signal?: AbortSignal): Promise<Result<{ conversationId: string }>> {
+    return this.send({ path: '/assist/conversations', body: {}, token, signal, schema: ConversationCreatedSchema, describe: chatMessage });
+  }
+
+  conversation(id: string, token: string, signal?: AbortSignal): Promise<Result<ConversationHistory>> {
+    return this.send({ method: 'GET', path: `/assist/conversations/${encodeURIComponent(id)}`, token, signal, schema: ConversationHistorySchema, describe: chatMessage });
+  }
+
+  deleteConversation(id: string, token: string, signal?: AbortSignal): Promise<Result<null>> {
+    return this.send({ method: 'DELETE', path: `/assist/conversations/${encodeURIComponent(id)}`, token, signal, schema: NoContentSchema, describe: chatMessage });
+  }
+
+  /** One turn in a conversation. A non-2xx is a failed turn (see chat()); the thrown error carries `.failure`. The turn is still stored by the server. */
+  say(id: string, text: string, token: string, signal?: AbortSignal): Promise<Result<ConversationReply>> {
+    return this.send({
+      path: `/assist/conversations/${encodeURIComponent(id)}/messages`, body: { text }, token, signal, schema: ConversationReplySchema, describe: chatMessage, timeoutMs: CHAT_TIMEOUT_MS,
+      onSuccess: () => ({ modelInvolved: true }),
+      onFailure: (body, res): ChatFailure | undefined => {
+        const parsed = ChatFailureBodySchema.safeParse(body);
+        if (!parsed.success) return undefined;
+        const ra = Number(res.headers.get('retry-after'));
+        return { code: parsed.data.error, answer: parsed.data.answer, stopReason: parsed.data.stopReason, steps: parsed.data.steps ?? [], ...(Number.isFinite(ra) && ra > 0 ? { retryAfterSec: Math.ceil(ra) } : {}) };
+      },
+    });
+  }
+
+  prefs(token: string, signal?: AbortSignal): Promise<Result<Prefs>> {
+    return this.send({ method: 'GET', path: '/assist/memories', token, signal, schema: PrefsSchema, describe: chatMessage });
+  }
+
+  setVegetarian(token: string, signal?: AbortSignal): Promise<Result<Prefs>> {
+    return this.send({ method: 'PUT', path: '/assist/memories/diet', body: { value: 'vegetarian' }, token, signal, schema: PrefsSchema, describe: chatMessage });
+  }
+
+  clearDiet(token: string, signal?: AbortSignal): Promise<Result<null>> {
+    return this.send({ method: 'DELETE', path: '/assist/memories/diet', token, signal, schema: NoContentSchema, describe: chatMessage });
+  }
+
   logout(refreshToken: string, signal?: AbortSignal): Promise<Result<null>> {
     return this.send({ path: '/auth/logout', body: { refreshToken }, signal, schema: NoContentSchema, describe: dataMessage });
   }
@@ -229,10 +276,10 @@ export class ApiClient {
 
     try {
       const headers: Record<string, string> = {};
-      if ((call.method ?? 'POST') === 'POST') headers['Content-Type'] = 'application/json';
+      if (call.body !== undefined) headers['Content-Type'] = 'application/json';
       if (call.token) headers['Authorization'] = `Bearer ${call.token}`;
       const method = call.method ?? 'POST';
-      const res = await fetch(`${this.baseUrl}${call.path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(call.body ?? {}) } : {}), signal: controller.signal });
+      const res = await fetch(`${this.baseUrl}${call.path}`, { method, headers, ...(call.body !== undefined ? { body: JSON.stringify(call.body) } : {}), signal: controller.signal });
       const traceId = res.headers.get('x-trace-id');
       const requestId = res.headers.get('x-request-id');
       const common = { httpStatus: res.status, statusText: res.statusText, traceId, requestId };

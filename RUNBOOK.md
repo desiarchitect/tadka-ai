@@ -34,7 +34,7 @@ What you will see when it runs:
 | The naive tool leaking another customer's address, and the fix | Section 7 |
 | `POST /assist/chat`: a question answered with tools | Section 7 |
 | Conversations that remember, history trimmed by whole turns, a saved vegetarian preference | Section 8 |
-| 545 passing tests (401 API + 13 fake provider + 131 web client) | `pnpm test` |
+| 566 passing tests (401 API + 13 fake provider + 152 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: a model-written summary of old turns (the note is written by code), memory the model
 can write, tools that change anything, RAG, deleting all of a customer's data, and defences against prompt injection beyond
@@ -287,7 +287,8 @@ Open `http://localhost:5173` in any browser while `pnpm dev` is running:
 9. **Switch customers**: **Sign in as Aman** aborts anything in flight, clears Rahul's orders, details and assistant result, then loads Aman's. The server decides what each token may see: asking for Rahul's order with Aman's token is a 404. Without the demo sign-in (a production build) use the email and password form (`rahul@tadka.test` / `Password123!`).
 10. **Classify an intent (EP-1)**: the **Intent classification** card sends your message to `POST /assist/intent`. The result has two parts, kept apart on screen: (1) the **classification**, one label, labelled as coming from the language model or from the keyword rules (`SIMULATED` in demo mode), and (2) the **next step**, chosen by server code from that label (for `order_status` the server reads your orders itself; the model never sees them). No confidence score is shown because the API sends none. **Check status (server lookup)** on an order calls `GET /assist/order-status` directly: no model is involved, and the page says so.
 11. **Ask with tools (EP-2)**: the **Ask about your orders** card sends your question to `POST /assist/chat` (body `{ "text" }` only). The server's model chooses read-only tools; the server validates every call, runs it for *your* account and checks ownership. The page shows two separate things: the **answer**, which the server writes from the tool results (the model writes none of it), and **the tools the server ran** with how each ended (`ok`, `not found`, `rejected`, `failed`). Tool arguments and results are not sent by the API, so the page does not show them. This needs a real provider (section 12); with none, or in `DEMO_MODE=1`, the card says the assistant is not configured (503). A question that could not be answered (provider failure, timeout, spending guard, database failure, rate limit) is shown as a **failure** in the page's own words, with the tools that ran before it stopped, and the server's fixed fallback sentence labelled "not an answer". **Cancel** aborts the request and the server abandons the turn. Switching customer mid-question aborts it too.
-12. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
+12. **Talk in a conversation (EP-3)**: the **Conversations** card keeps conversations on the server (`/assist/conversations`). **New conversation** creates one; each **Send** posts only your text, and the server gives the assistant your earlier turns (the newest whole turns that fit a size budget; the page says how many it was given and how many older ones were left out). The transcript is always re-read from the server, including a turn that failed (shown as "No answer", not as an answer). **Open** continues a conversation from the list; deleting takes two clicks and also deletes its turns. The **vegetarian** checkbox saves your one preference on the server (`/assist/memories/diet`); while it is on, menus the assistant reads are filtered by the server and the answer says so; untick it to delete it. Menus on the Restaurants tab show a **Vegetarian** marker for dishes the API marks `isVeg: true` (and nothing for the others). Switching customer clears the card, aborts a message in flight, and loads the new customer's conversations and preference from the server. Needs a real provider, like step 11.
+13. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
 
 
 ### Recording a demo (the explicit opt-in)
@@ -1003,7 +1004,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 401 API tests and 131 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 401 API tests and 152 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|

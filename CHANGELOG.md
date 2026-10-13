@@ -39,12 +39,18 @@ Episode 3: conversation memory. Starts from `ep02-typed-tool-calling`.
 ### Not in this branch
 - A model-written summary of old turns, memory the model can write, deleting all of a customer's data, tools that change anything, RAG and prompt-injection defences. They arrive in later episode branches.
 
+### Added (client, `apps/web`; no backend change)
+- The product UI from the EP-0, EP-1 and EP-2 branches, and a **Conversations** card for EP-3: create, list, open and delete conversations (two-step delete), send follow-ups, and a saved vegetarian preference that is set and removed through the API. Everything shown is read from the server, which decides whose conversations exist (another customer's id is a 404); the transcript is re-read after every turn, so a failed turn the server stored is shown as "No answer". A turn's tools and how many earlier turns the model was given (and how many were left out) are shown. Failed turns use the page's own wording per code, including `conversation_busy`, `conversation_full` and `invalid_history`. Cancel and switching customer abort a message in flight and a late answer is ignored.
+- Menus show a **Vegetarian** marker for dishes the API marks `isVeg: true`. Nothing is claimed about the other dishes.
+- The capability list shows EP-3 as available.
+- Tests: 566 (401 API, 13 fake provider, 152 web client).
+
 ### Changed (EP-2 remediation merged into this branch)
 - Merged `ep02-typed-tool-calling` (`ef77283`) into this branch: the EP-0/EP-1 remediation, the EP-2 fixes F-3, F-5, F-6 and O-1, and the product UI (orders, details, menus, payment, sign-in, intent card, tool-calling card). Conflicts were in `RUNBOOK.md`, `apps/api/package.json`, `app.ts`, `agent-loop.ts` and `routes.ts`; EP-3's conversations, memories, history trimming and the vegetarian preference are unchanged.
 - `TurnOptions` (EP-3) now also carries `signal`: when the client goes away the whole turn is abandoned. `StopReason` has both `invalid_history` (EP-3) and `cancelled`.
 - `POST /assist/conversations/:id/messages` is model-spending on every turn, so it now has what `/assist/chat` got: customers only through the shared guard, the per-user limit (429), the turn is aborted on client disconnect (nothing is stored, and the response is not written), and a turn that did not answer is a non-2xx with `error` and the fixed fallback in `answer`. The failed turn is still stored, as before, so the history shows what the customer saw. `invalid_history` (nothing was sent to the provider) is a `409 invalid_history`.
 - `/assist/chat` and the conversation route are off in demo mode.
-- Tests: 545 (401 API, 13 fake provider, 131 web client).
+- Tests: 545 (401 API, 13 fake provider, 131 web client), before the client work below.
 
 ## ep02-typed-tool-calling - 2026-10-11
 

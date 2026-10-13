@@ -167,6 +167,13 @@ describe('configuration', () => {
     for (const v of ['true', 'yes', '2', ' 1', 'on', 'banana']) expect(() => loadConfig({ DEMO_MODE: v })).toThrow(/DEMO_MODE/);
   });
 
+  it('a setting that is present but empty takes its default, and is never turned into 0 or an empty URL', () => {
+    const c = loadConfig({ PORT: '', DATABASE_URL: '', TRIAGE_RATE_LIMIT_PER_MIN: '', TRIAGE_TIMEOUT_MS: '', M0_BUDGET_USD: '', FAKE_PSP_URL: '', DEMO_MODE: '' });
+    expect(c).toMatchObject({ PORT: 3000, TRIAGE_RATE_LIMIT_PER_MIN: 10, TRIAGE_TIMEOUT_MS: 15_000, M0_BUDGET_USD: 5, DEMO_MODE: false });
+    expect(c.DATABASE_URL).toMatch(/^postgres:\/\//);
+    expect(c.FAKE_PSP_URL).toBe('http://localhost:4010');
+  });
+
   it('rate limit and timeout have defaults (10 per minute, 15 s) and reject nonsense', () => {
     const c = loadConfig({});
     expect(c.TRIAGE_RATE_LIMIT_PER_MIN).toBe(10);

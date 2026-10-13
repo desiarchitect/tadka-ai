@@ -7,6 +7,7 @@ import type { ConversationsService, MemoriesService, Prefs } from '../memory/ser
 import { ForbiddenError } from '../shared/errors.js';
 import type { Principal } from '../shared/principal.js';
 import type { TurnOptions, TurnResult } from './agent-loop.js';
+import { clientGone, perUserLimit, requireCustomer, sendFailedTurn } from './guard.js';
 import { HISTORY_BUDGET_BYTES, selectHistory } from './history.js';
 
 type Deps = {
@@ -16,6 +17,8 @@ type Deps = {
   conversations: ConversationsService;
   memories: MemoriesService;
   historyBudgetBytes?: number;
+  /** Per-user model-spending requests a minute (the same setting as the other assist routes). */
+  rateLimitPerMin?: number;
 };
 
 const idParam = z.object({ id: z.uuid() });
@@ -41,20 +44,34 @@ export function registerConversationRoutes(app: FastifyInstance, deps: Deps) {
   // One turn: load the stored history, send the newest whole turns that fit the budget, run
   // the loop, then store this turn. The store only succeeds if no other turn committed in
   // the meantime (409 conversation_busy), so two tabs can't interleave a conversation.
-  app.post('/assist/conversations/:id/messages', async (req) => {
-    const p = await customer(req);
+  // Guarded like the other model-spending routes: customers only, a per-user limit (429), the turn is aborted when the client
+  // goes away (and then nothing is stored), and a turn that did not answer is a non-2xx with a machine-readable `error`.
+  // `app` must be a scope in which registerAssistLimiter() has been awaited (see guard.ts).
+  app.post('/assist/conversations/:id/messages', {
+    preHandler: requireCustomer(deps.principal, 'customers_only'),
+    config: perUserLimit(deps.rateLimitPerMin),
+  }, async (req, reply) => {
+    const p = req.principal!;
     const { id } = deps.parse(idParam, req.params);
     const { text } = deps.parse(textBody, req.body);
     const state = await deps.conversations.loadForTurn(p, id);
     if (!deps.chat) throw Object.assign(new Error('assistant_not_configured'), { status: 503 });
     const h = selectHistory(state.turns, deps.historyBudgetBytes ?? HISTORY_BUDGET_BYTES);
-    const r = await deps.chat(p, text, { history: h.messages, turnNo: state.nextTurnNo, prefs: await deps.memories.get(p) });
-    await deps.conversations.appendTurn(p, id, state.version, state.nextTurnNo, {
-      userText: text, answer: r.answer, stopReason: r.stopReason, steps: r.steps, messages: r.turnMessages,
-    });
-    // Never log the customer's text or the answer.
-    req.log.info({ event: 'assist.turn', turnNo: state.nextTurnNo, stopReason: r.stopReason, turnsSent: h.turnsSent, turnsDropped: h.turnsDropped });
-    return { answer: r.answer, stopReason: r.stopReason, steps: r.steps, context: { turnsSent: h.turnsSent, turnsDropped: h.turnsDropped, historyBytes: h.historyBytes } };
+    const gone = clientGone(reply);
+    try {
+      const r = await deps.chat(p, text, { history: h.messages, turnNo: state.nextTurnNo, prefs: await deps.memories.get(p), signal: gone.signal });
+      // The client left: the turn was abandoned, so nothing is stored and the conversation is exactly as it was.
+      if (r.stopReason === 'cancelled') return reply.code(499).send();
+      await deps.conversations.appendTurn(p, id, state.version, state.nextTurnNo, {
+        userText: text, answer: r.answer, stopReason: r.stopReason, steps: r.steps, messages: r.turnMessages,
+      });
+      // Never log the customer's text or the answer.
+      req.log.info({ event: 'assist.turn', turnNo: state.nextTurnNo, stopReason: r.stopReason, turnsSent: h.turnsSent, turnsDropped: h.turnsDropped });
+      if (r.failure) return sendFailedTurn(req, reply, '/assist/conversations/:id/messages', r.failure, r);
+      return { answer: r.answer, stopReason: r.stopReason, steps: r.steps, context: { turnsSent: h.turnsSent, turnsDropped: h.turnsDropped, historyBytes: h.historyBytes } };
+    } finally {
+      gone.release();
+    }
   });
 
   // Long-term memory: only what the customer chose to save, from an allow-list.

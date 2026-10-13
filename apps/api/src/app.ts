@@ -1,12 +1,12 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import cors from '@fastify/cors';
-import rateLimit from '@fastify/rate-limit';
 import { AISDKError } from 'ai';
 import { trace } from '@opentelemetry/api';
 import type { ModelPort } from './llm/types.js';
 import { z } from 'zod';
 import { DEMO_MODEL_ID } from './assist/demo-model.js';
 import { classifyProviderError, safeErrorFields } from './assist/errors.js';
+import { perUserLimit, providerSignal, registerAssistLimiter, requireCustomer } from './assist/guard.js';
 import { triage } from './assist/triage.js';
 import { verifyAccessToken, type SigningKeys } from './identity/access-tokens.js';
 import { IdentityService } from './identity/service.js';
@@ -24,7 +24,7 @@ import type { PaymentProvider } from './payments/provider.js';
 import { PaymentsService } from './payments/service.js';
 import { RestaurantsService } from './restaurants/service.js';
 import type { Db } from './shared/db.js';
-import { ForbiddenError, UnauthorizedError } from './shared/errors.js';
+import { UnauthorizedError } from './shared/errors.js';
 import type { Principal } from './shared/principal.js';
 
 // `providerOptions` and `config.priceKey` come from the ModelHandle built in src/llm.
@@ -47,10 +47,6 @@ export type AppDeps = {
   triageTimeoutMs?: number;
   logger?: FastifyServerOptions['logger'];
 };
-
-declare module 'fastify' {
-  interface FastifyRequest { principal?: Principal }
-}
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const loggerOption = deps.logger ?? (deps.logStream ? { level: 'info', stream: deps.logStream } : process.env.NODE_ENV !== 'test' && { level: 'info' });
@@ -128,40 +124,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get('/orders/:id', async (req) => orders.get(await principal(req), parse(idParam, req.params).id));
   app.post('/orders/:id/pay', async (req) => orders.pay(await principal(req), parse(idParam, req.params).id));
 
-  const a = deps.assistant;
+  // EP2/EP3: the tool-calling turn. Demo mode must never reach a provider, so it gets no assistant even if one was passed in.
+  const a = deps.demo === true ? undefined : deps.assistant;
   const chat = a && ((p: Principal, text: string, opts: TurnOptions & { prefs?: Prefs } = {}) => runTurn({
     model: a.model, providerOptions: a.providerOptions, ledger: a.ledger, config: a.config,
     executor: { orders, restaurants, prefs: opts.prefs, audit: a.audit, log: (line) => app.log.info(line) },
     log: (e) => app.log.warn(e),
   }, p, text, opts));
-  registerAssistRoutes(app, { orders, principal, parse, classify: deps.classify ?? rulesClassifier, chat, memories });
-  registerConversationRoutes(app, { principal, parse, chat, conversations, memories, historyBudgetBytes: a?.historyBudgetBytes });
 
   const triageBody = z.object({ message: z.string().trim().min(1).max(500) });
   // The caller's identity and role come from the verified token only, never from the request body.
-  const requireCustomer = async (req: FastifyRequest) => {
-    const p = await principal(req);
-    if (p.role !== 'Customer') throw new ForbiddenError('forbidden_role');
-    req.principal = p;
-  };
-  // The limiter attaches itself to routes through an onRoute hook, so it must be loaded BEFORE the route
-  // is declared. A plain `app.register(rateLimit)` is deferred and would leave the route unlimited.
-  // Only routes that set `config.rateLimit` are limited; `preHandler` lets the key be the verified user.
+  // The guard (customer check, per-user limit, provider timeout) is shared: see src/assist/guard.ts.
   app.register(async (scope) => {
-    await scope.register(rateLimit, {
-      global: false,
-      hook: 'preHandler',
-      errorResponseBuilder: (_req, ctx) => Object.assign(new Error('rate_limited'), { status: 429, retryAfterSec: Math.ceil(ctx.ttl / 1000) }),
-    });
+    await registerAssistLimiter(scope);
+    // Demo mode must never reach a provider: even if a real classifier was passed in, the keyword rules answer.
+    const classify = deps.demo === true ? rulesClassifier : (deps.classify ?? rulesClassifier);
+    registerAssistRoutes(scope, { orders, principal, parse, classify, chat, memories, demo: deps.demo, rateLimitPerMin: deps.triageRateLimitPerMin, timeoutMs: deps.triageTimeoutMs });
+    // Conversations spend model tokens on every message, so they are in the same scope: the same per-user limit applies.
+    registerConversationRoutes(scope, { principal, parse, chat, conversations, memories, historyBudgetBytes: a?.historyBudgetBytes, rateLimitPerMin: deps.triageRateLimitPerMin });
     scope.post('/assist/triage', {
-      preHandler: requireCustomer, // the limiter's hook is added after this one, so it sees req.principal
-      config: { rateLimit: { max: deps.triageRateLimitPerMin ?? 10, timeWindow: '1 minute', keyGenerator: (req: FastifyRequest) => req.principal!.userId } },
+      preHandler: requireCustomer(principal),
+      config: perUserLimit(deps.triageRateLimitPerMin),
     }, async (req) => {
       const p = req.principal!;
       const b = parse(triageBody, req.body);
       if (!deps.model) throw Object.assign(new Error('provider_not_configured'), { status: 503 });
       try {
-        const r = await triage(deps.model, b.message, { abortSignal: AbortSignal.timeout(deps.triageTimeoutMs ?? 15_000) });
+        const r = await triage(deps.model, b.message, { abortSignal: providerSignal(deps.triageTimeoutMs) });
         const simulated = deps.demo === true;
         return {
           output: r.output,

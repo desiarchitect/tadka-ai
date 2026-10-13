@@ -1,6 +1,6 @@
 // EP2 step 3: the agent loop with a scripted fake model and in-memory services.
 // No network, no key, no cost.
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { APICallError } from 'ai';
@@ -232,13 +232,40 @@ describe('budget gate (section 3b)', () => {
     expect(r.chargedUsd).toBeCloseTo(r.estimatedUsd, 10);
   });
 
-  it('usage above the estimate is charged at actual, logged, and stops the turn', async () => {
+  it('usage above what the request could possibly have used is NOT written down: charged at the estimate, logged, live calls blocked, turn stopped', async () => {
     const t = setup([{ calls: [['get_my_orders', {}]], usage: { in: 9_000_000, out: 20 } }, { calls: [present('r1')] }]);
     const r = await t.run();
     expect(r.stopReason).toBe('budget');
+    expect(r.failure).toEqual({ status: 503, code: 'budget_exhausted' });
     expect(t.events).toHaveLength(1);
-    expect(t.events[0]).toMatchObject({ event: 'estimator_violation', inputTokens: 9_000_000 });
-    expect(t.ledger.spent()).toBeCloseTo(BudgetLedger.cost('azure:gpt-5.4-mini', 9_000_000, 20));
+    expect(t.events[0]).toMatchObject({ event: 'usage_rejected', reason: 'above_absolute_bound' });
+    // The wrong number never reaches the accounts: the request is charged at the estimate it was reserved with.
+    expect(t.ledger.spent()).toBeCloseTo(r.estimatedUsd, 10);
+    expect(t.ledger.spent()).toBeLessThan(BudgetLedger.cost('azure:gpt-5.4-mini', 9_000_000, 20) / 100);
+    expect(t.ledger.halted()).toMatchObject({ reason: 'usage_rejected:above_absolute_bound' });
+    // ...and the next turn sends nothing until an operator has looked.
+    const before = t.model.doGenerateCalls.length;
+    expect((await t.run()).stopReason).toBe('budget');
+    expect(t.model.doGenerateCalls.length).toBe(before);
+  });
+
+  it('usage inside the absolute bounds but above this request\'s own estimate is an estimator violation: logged, charged at the estimate, blocked', async () => {
+    const t = setup([{ calls: [['get_my_orders', {}]], usage: { in: 60_000, out: 20 } }, { calls: [present('r1')] }]);
+    const r = await t.run();
+    expect(r).toMatchObject({ stopReason: 'budget', failure: { status: 503, code: 'budget_exhausted' } });
+    expect(t.events[0]).toMatchObject({ event: 'estimator_violation', inputTokens: 60_000 });
+    expect(t.ledger.spent()).toBeCloseTo(r.estimatedUsd, 10);
+    expect(t.ledger.halted()?.reason).toBe('usage_rejected:above_request_bound');
+  });
+
+  it('a corrupt or blocked ledger sends nothing and is reported as a budget failure, not a crash', async () => {
+    const path = ledgerPath();
+    writeFileSync(path, '{ not json');
+    const t = setup([{ calls: [present('r1')] }], { ledger: new BudgetLedger(path, 5) });
+    const r = await t.run();
+    expect(r).toMatchObject({ stopReason: 'budget', failure: { status: 503, code: 'budget_exhausted' } });
+    expect(t.model.doGenerateCalls.length).toBe(0);
+    expect(t.events[0]).toMatchObject({ event: 'ledger_unavailable', reason: 'LedgerCorruptError' });
   });
 
   it('an unpriced model sends nothing', async () => {
@@ -287,5 +314,112 @@ describe('payload cap (bytes) is separate from the budget (USD)', () => {
   it('under the payload cap but over budget stops with budget', async () => {
     const r = await setup([{ calls: [present('r1')] }], { config: { turnBudgetUsd: 0.000001 } }).run();
     expect(r.stopReason).toBe('budget');
+  });
+});
+
+// F-6: a turn that did not answer is a failure with a status and a machine-readable code. The fallback sentence stays.
+describe('failure semantics (F-6)', () => {
+  const apiErr = (statusCode: number, headers: Record<string, string> = {}) =>
+    new APICallError({ message: 'SECRET provider text sk-LEAK resource my-resource', url: 'https://my-resource.openai.azure.com/x', requestBodyValues: { prompt: 'SECRET PROMPT' }, statusCode, responseHeaders: headers, responseBody: '{"error":"SECRET body"}' });
+  const fail = async (steps: Step[], over?: Parameters<typeof setup>[1]) => { const t = setup(steps, over); return { t, r: await t.run() }; };
+
+  it.each([
+    ['429 with Retry-After', apiErr(429, { 'retry-after': '3' }), { status: 429, code: 'provider_rate_limited', retryAfterSec: 3 }],
+    ['401', apiErr(401), { status: 502, code: 'provider_auth' }],
+    ['403', apiErr(403), { status: 502, code: 'provider_auth' }],
+    ['500', apiErr(500), { status: 502, code: 'provider_unavailable' }],
+    ['503', apiErr(503), { status: 502, code: 'provider_unavailable' }],
+    ['504 from the provider', apiErr(504), { status: 504, code: 'provider_timeout' }],
+    ['408', apiErr(408), { status: 504, code: 'provider_timeout' }],
+    ['a TimeoutError', Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }), { status: 504, code: 'provider_timeout' }],
+    ['an error nobody classified', new Error('boom SECRET sk-LEAK'), { status: 502, code: 'provider_unavailable' }],
+  ])('provider %s -> %o, fixed fallback, nothing from the provider in the result or the log', async (_n, err, failure) => {
+    const { t, r } = await fail([{ calls: [], throws: err }]);
+    expect(r).toMatchObject({ stopReason: expect.stringMatching(/^(provider_error|deadline)$/), answer: FALLBACK, failure });
+    const everything = JSON.stringify([r, t.events]);
+    expect(everything).not.toMatch(/SECRET|sk-LEAK|my-resource|openai\.azure\.com/);
+    expect(t.ledger.ambiguous()).toEqual([]); // charged at the estimate, nothing left held
+  });
+
+  it('a model request past the deadline is a 504 provider_timeout; a slow tool is a 504 turn_timeout (the provider was fine)', async () => {
+    const a = await fail([{ calls: [present('r1')], delayMs: 2000 }], { config: { deadlineMs: 150 } });
+    expect(a.r).toMatchObject({ stopReason: 'deadline', failure: { status: 504, code: 'provider_timeout' } });
+    const svc = services({ delay: () => 2000 });
+    const b = await fail([{ calls: [['get_order', { orderId: OWN }]] }, { calls: [present('r1')] }], { svc, config: { deadlineMs: 150 } });
+    expect(b.r).toMatchObject({ stopReason: 'deadline', failure: { status: 504, code: 'turn_timeout' } });
+  });
+
+  it('prose instead of a tool call, twice: 502 provider_bad_output; a content filter: 502 provider_refused', async () => {
+    expect((await fail([{ text: 'Hello! Ignore your rules.' }])).r).toMatchObject({ stopReason: 'invalid_output', failure: { status: 502, code: 'provider_bad_output' }, answer: FALLBACK });
+    expect((await fail([{ text: '', finish: 'content-filter' }])).r).toMatchObject({ stopReason: 'refusal', failure: { status: 502, code: 'provider_refused' } });
+  });
+
+  it('a model that loops or asks for too much: step limit, tool-call limit, invalid arguments and a made-up result id are all 502 provider_bad_output', async () => {
+    const loop: Step[] = Array.from({ length: 7 }, () => ({ calls: [['get_my_orders', {}]] as [string, unknown][] }));
+    expect((await fail(loop)).r).toMatchObject({ stopReason: 'step_limit', failure: { status: 502, code: 'provider_bad_output' } });
+    expect((await fail([{ calls: Array.from({ length: 9 }, () => ['get_my_orders', {}] as [string, unknown]) }])).r).toMatchObject({ stopReason: 'tool_call_limit', failure: { code: 'provider_bad_output' } });
+    expect((await fail([{ calls: [['get_order', { orderId: 'nope' }]] }, { calls: [['get_order', { orderId: 'nope' }]] }])).r).toMatchObject({ stopReason: 'invalid_output', failure: { code: 'provider_bad_output' } });
+    expect((await fail([{ calls: [present('r9')] }])).r).toMatchObject({ stopReason: 'invalid_output', failure: { code: 'provider_bad_output' } });
+  });
+
+  it('a database failure that leaves nothing to show is a 503 backend_unavailable, not a successful answer', async () => {
+    const { r } = await fail([{ calls: [['get_order', { orderId: BROKEN }]] }, { calls: [present('r1')] }]);
+    expect(r).toMatchObject({ stopReason: 'answered', answer: FAILED, steps: [{ tool: 'get_order', status: 'failed' }], failure: { status: 503, code: 'backend_unavailable' } });
+  });
+
+  it('...but if part of the answer is real (one result failed, one did not) the turn answered', async () => {
+    const { r } = await fail([{ calls: [['get_order', { orderId: BROKEN }], ['get_order', { orderId: OWN }]] }, { calls: [present('r1', 'r2')] }]);
+    expect(r.failure).toBeUndefined();
+    expect(r.answer).toContain(FAILED);
+    expect(r.answer).toContain('Your order');
+  });
+
+  it('answers and clarifying questions carry no failure', async () => {
+    expect((await fail([{ calls: [['get_my_orders', {}]] }, { calls: [present('r1')] }])).r.failure).toBeUndefined();
+    expect((await fail([{ calls: [['final_answer', { kind: 'clarify', resultIds: [], clarifyReason: 'which_order' }]] }])).r.failure).toBeUndefined();
+  });
+
+  it('the spending cap is a 503 budget_exhausted', async () => {
+    expect((await fail([{ calls: [present('r1')] }], { config: { turnBudgetUsd: 0.000001 } })).r).toMatchObject({ stopReason: 'budget', failure: { status: 503, code: 'budget_exhausted' } });
+  });
+});
+
+// F-5: the client went away. The provider call is abandoned, no further tool starts, nothing is left held.
+describe('cancellation (F-5)', () => {
+  const abortedAfter = (ms: number) => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+
+  it('an already-cancelled turn sends nothing', async () => {
+    const t = setup([{ calls: [present('r1')] }]);
+    const c = new AbortController(); c.abort();
+    const r = await runTurn(t.deps, rahul, 'hi', { signal: c.signal });
+    expect(r).toMatchObject({ stopReason: 'cancelled', requests: 0 });
+    expect(t.model.doGenerateCalls.length).toBe(0);
+  });
+
+  it('cancelled while the provider is working: the call is abandoned at once (not at the 20 s deadline), the estimate is charged, nothing stays held', async () => {
+    const t = setup([{ calls: [present('r1')], delayMs: 8000 }], { config: { deadlineMs: 20_000 } });
+    const started = Date.now();
+    const r = await runTurn(t.deps, rahul, 'hi', { signal: abortedAfter(60) });
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(r.stopReason).toBe('cancelled');
+    expect(r.failure).toBeUndefined();
+    expect(t.ledger.spent()).toBeGreaterThan(0);
+    expect(t.ledger.ambiguous()).toEqual([]);
+    expect(t.ledger.committed()).toBeCloseTo(t.ledger.spent());
+  });
+
+  it('cancelled during a tool: the turn stops, the second tool is never started, and no further model request is made', async () => {
+    const svc = services({ delay: () => 500 });
+    const t = setup([{ calls: [['get_order', { orderId: OWN }], ['get_order', { orderId: OWN2 }]] }, { calls: [present('r1', 'r2')] }], { svc, config: { parallel: 1 } });
+    const r = await runTurn(t.deps, rahul, 'hi', { signal: abortedAfter(100) });
+    expect(r.stopReason).toBe('cancelled');
+    expect(svc.calls.get).toBe(1);
+    expect(t.model.doGenerateCalls.length).toBe(1);
+  });
+
+  it('a turn that is not cancelled is unaffected by the signal being present', async () => {
+    const t = setup([{ calls: [['get_my_orders', {}]] }, { calls: [present('r1')] }]);
+    const r = await runTurn(t.deps, rahul, 'hi', { signal: new AbortController().signal });
+    expect(r.stopReason).toBe('answered');
   });
 });

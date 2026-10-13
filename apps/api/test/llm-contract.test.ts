@@ -4,6 +4,7 @@
 // does not prove: how a live deployment behaves (that is the live check).
 import { describe, expect, it } from 'vitest';
 import { BudgetLedger } from '../src/assist/budget.js';
+import { classifyIntent } from '../src/assist/classifier.js';
 import { classifyProviderError } from '../src/assist/errors.js';
 import { MAX_OUTPUT_TOKENS, triage } from '../src/assist/triage.js';
 import { createModelHandle, loadLlmConfig, type ModelHandle } from '../src/llm/index.js';
@@ -127,6 +128,14 @@ describe.each(CASES)('abort signal reaches fetch: $name', (c) => {
     const classified = classifyProviderError(err);
     expect(classified?.status).toBe(504);
     expect(classified?.message).toBe('provider_timeout');
+  });
+
+  it('the intent classifier: a timeout aborts the in-flight request and is reported as provider_error / provider_timeout', async () => {
+    const { seen, fetchStub } = hangingFetch();
+    const r = await classifyIntent(handle(fetchStub), 'where is my order', { abortSignal: AbortSignal.timeout(100) });
+    expect(r).toMatchObject({ outcome: 'provider_error', reason: 'provider_timeout' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.signal!.aborted).toBe(true);
   });
 
   it('a user cancel aborts the request too, and is not reported as a timeout', async () => {

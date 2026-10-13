@@ -6,7 +6,8 @@ import type { BudgetLedger } from './budget.js';
 import { classifyIntent, MAX_OUTPUT_TOKENS, SYSTEM_PROMPT, type ClassifyResult } from './classifier.js';
 import { classifyWithRules } from './intent.js';
 
-export type IntentClassifier = (text: string) => Promise<ClassifyResult & { classifier: 'llm' | 'rules' }>;
+export type ClassifyOptions = { abortSignal?: AbortSignal };
+export type IntentClassifier = (text: string, opts?: ClassifyOptions) => Promise<ClassifyResult & { classifier: 'llm' | 'rules' }>;
 
 // No model, no key, no cost. The default when no model provider is configured.
 export const rulesClassifier: IntentClassifier = async (text) => ({
@@ -29,14 +30,18 @@ export function worstCaseInputTokens(text: string): number {
 // The LLM classifier behind the budget ledger. The ledger refuses BEFORE the request is sent
 // if actual spend so far plus the worst case for this request could cross the cap.
 export function llmClassifier(handle: ModelHandle, ledger: BudgetLedger): IntentClassifier {
-  return async (text) => {
+  return async (text, opts) => {
     try {
       ledger.assertAffordable(handle.priceKey, worstCaseInputTokens(text), MAX_OUTPUT_TOKENS);
     } catch {
-      return { classifier: 'llm', outcome: 'provider_error', reason: 'budget' };
+      return { classifier: 'llm', outcome: 'provider_error', reason: 'budget', diag: { code: 'budget' } };
     }
-    const r = await classifyIntent(handle, text);
-    if (r.usage) ledger.record(handle.priceKey, r.usage.inputTokens, r.usage.outputTokens);
+    const r = await classifyIntent(handle, text, opts);
+    if (r.usage) {
+      // The ledger checks the figures against what this request could possibly have used (and blocks live calls if they
+      // are wrong). If the ledger itself is unusable the answer is still returned: the next call is refused anyway.
+      try { ledger.record(handle.priceKey, r.usage.inputTokens, r.usage.outputTokens, { maxInputTokens: worstCaseInputTokens(text), maxOutputTokens: MAX_OUTPUT_TOKENS }); } catch { /* refused on the next call */ }
+    }
     return { classifier: 'llm', ...r };
   };
 }

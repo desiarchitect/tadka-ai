@@ -4,13 +4,15 @@
 import { BudgetLedger } from './budget.js';
 import { MAX_OUTPUT_TOKENS, type ClassifyResult } from './classifier.js';
 import { worstCaseInputTokens } from './classifiers.js';
-import type { Intent } from './intent.js';
+import { INTENTS, type Intent } from './intent.js';
 
 export type EvalMessage = { text: string; expected: Intent; lang: 'en' | 'hinglish'; hard?: boolean };
 export type EvalOutcome = ClassifyResult['outcome'] | 'budget_stop';
 export type EvalRow = {
   text: string; expected: Intent; lang: EvalMessage['lang']; hard: boolean;
   outcome: EvalOutcome; predicted?: Intent; correct: boolean;
+  /** Why a call produced no intent (for example provider_timeout). A category, never provider text. */
+  reason?: string;
   latencyMs: number; inputTokens: number; outputTokens: number; costUsd: number;
 };
 
@@ -62,14 +64,29 @@ export async function runEval(
     const inputTokens = r.usage?.inputTokens ?? 0;
     const outputTokens = r.usage?.outputTokens ?? 0;
     const costUsd = r.usage && budget ? budget.afterResponse(inputTokens, outputTokens) : 0;
-    rows.push({ ...base, latencyMs, inputTokens, outputTokens, costUsd, outcome: r.outcome, predicted: r.outcome === 'ok' ? r.intent : undefined, correct: r.outcome === 'ok' && r.intent === m.expected });
+    rows.push({ ...base, latencyMs, inputTokens, outputTokens, costUsd, outcome: r.outcome, predicted: r.outcome === 'ok' ? r.intent : undefined, correct: r.outcome === 'ok' && r.intent === m.expected, reason: 'reason' in r ? r.reason : undefined });
   }
   return rows;
 }
 
+const pctOf = (n: number, d: number) => (d === 0 ? null : Math.round((1000 * n) / d) / 10);
+const nearestRank = (sorted: number[], q: number) => (sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1)]!);
+
+/**
+ * The same messages answered by two classifiers, paired. `aOnly` and `bOnly` are the discordant pairs: the only ones
+ * that say which classifier is better (McNemar's test uses exactly those two numbers). Both rows lists must be the
+ * same messages in the same order, or this throws: a comparison on different messages would mean nothing.
+ */
+export function pairedComparison(a: EvalRow[], b: EvalRow[]) {
+  if (a.length !== b.length || a.some((r, i) => r.text !== b[i]!.text || r.expected !== b[i]!.expected)) throw new Error('paired comparison needs the same messages in the same order');
+  let bothCorrect = 0, aOnly = 0, bOnly = 0, bothWrong = 0;
+  a.forEach((r, i) => { const o = b[i]!; if (r.correct && o.correct) bothCorrect++; else if (r.correct) aOnly++; else if (o.correct) bOnly++; else bothWrong++; });
+  return { n: a.length, bothCorrect, aOnly, bOnly, bothWrong };
+}
+
 export function summarize(rows: EvalRow[]) {
   const total = rows.length;
-  const pct = (n: number, d: number) => (d === 0 ? null : Math.round((1000 * n) / d) / 10);
+  const pct = pctOf;
   const correct = rows.filter((r) => r.correct).length;
   const outcomes: Record<string, number> = {};
   for (const r of rows) outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
@@ -83,5 +100,19 @@ export function summarize(rows: EvalRow[]) {
     inputTokens: rows.reduce((s, r) => s + r.inputTokens, 0),
     outputTokens: rows.reduce((s, r) => s + r.outputTokens, 0),
     meanLatencyMs: total === 0 ? 0 : Math.round(rows.reduce((s, r) => s + r.latencyMs, 0) / total),
+    // Per intent: of the messages whose true label is X (support), how many were answered X (recall); of the answers
+    // "X", how many were right (precision). A message with no valid answer is a miss for recall and no answer for precision.
+    perIntent: Object.fromEntries(INTENTS.map((label) => {
+      const support = rows.filter((r) => r.expected === label).length;
+      const predicted = rows.filter((r) => r.predicted === label).length;
+      const truePositives = rows.filter((r) => r.predicted === label && r.expected === label).length;
+      return [label, { support, predicted, truePositives, precisionPct: pct(truePositives, predicted), recallPct: pct(truePositives, support) }];
+    })) as Record<Intent, { support: number; predicted: number; truePositives: number; precisionPct: number | null; recallPct: number | null }>,
+    // Shares of ALL messages. A budget stop is reported apart: it means the run did not ask, not that the model failed.
+    failureRates: {
+      refusalPct: pct(outcomes.refusal ?? 0, total), invalidOutputPct: pct(outcomes.invalid_output ?? 0, total), providerErrorPct: pct(outcomes.provider_error ?? 0, total),
+      timeoutPct: pct(rows.filter((r) => r.reason === 'provider_timeout').length, total), budgetStopPct: pct(outcomes.budget_stop ?? 0, total),
+    },
+    latency: (() => { const sent = rows.filter((r) => r.outcome !== 'budget_stop').map((r) => r.latencyMs).sort((x, y) => x - y); return { sent: sent.length, meanMs: sent.length ? Math.round(sent.reduce((x, y) => x + y, 0) / sent.length) : 0, p50Ms: nearestRank(sent, 0.5), p95Ms: nearestRank(sent, 0.95), maxMs: sent.length ? sent[sent.length - 1]! : 0 }; })(),
   };
 }

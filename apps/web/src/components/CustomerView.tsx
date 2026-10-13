@@ -7,6 +7,8 @@ interface CustomerViewProps {
   /** When set, the form is disabled and this explains why. */
   unavailableReason?: string | null;
   isLoading: boolean;
+  /** false when another card started the request in flight: this form is locked, but shows no spinner or Cancel. */
+  activeRequest?: boolean;
   result: TriageResponse | null;
   error: string | null;
   onReset: () => void;
@@ -32,10 +34,12 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
   onCancel,
   unavailableReason = null,
   isLoading,
+  activeRequest = true,
   result,
   error,
   onReset,
 }) => {
+  const working = isLoading && activeRequest;
   const [message, setMessage] = useState(PRESET_MESSAGES[0]?.text ?? '');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -95,7 +99,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             className="btn-primary"
             disabled={locked || !message.trim()}
           >
-            {isLoading ? (
+            {working ? (
               <>
                 <span className="spinner" aria-hidden="true" />
                 <span>Analyzing Request...</span>
@@ -104,7 +108,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
               <span>Submit to Assistant &rarr;</span>
             )}
           </button>
-          {isLoading && (
+          {working && (
             <button type="button" className="btn-sm" onClick={onCancel}>
               Cancel
             </button>

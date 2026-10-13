@@ -40,6 +40,19 @@ Episode 2: typed tool calling with server-side identity. Starts from `ep01-struc
 - On a clean clone: install, migrate, seed, `pnpm dev`; the naive-tool demo; `POST /assist/chat` returning 503 without a model, in bash and PowerShell; the budget commands.
 - The loop through the Azure provider package against a local stand-in for the Responses API: tool calls, tool results, `tool_choice: required`, the output cap, `store: false` and reasoning off are sent as expected. This checks the request and response format only, not a real model.
 
+### Changed (remediation after the independent verification of EP-2)
+- Merged the EP-0/EP-1 remediation (`e002976`: nine commits) into this branch, keeping the tool implementation as it was. Conflicts were in `.env.example`, `.gitignore`, `RUNBOOK.md`, `app.ts`, `routes.ts`, `main.ts` and `test/helpers.ts`; the typed-tool authorization, strict validation, read-only policy, limits and fixed fallback are untouched. This fixes F-1 (demo mode reaching a provider; `/assist/chat` is now also off in demo mode), F-2 (the `.env.example` quick start), F-4 (`/assist/intent` timeout) and F-7 (client defects).
+- F-3: `POST /assist/chat` is rate limited per verified user with the shared limiter (`TRIAGE_RATE_LIMIT_PER_MIN`, default 10). A refused request (no token, wrong role) uses no quota. A limited request never reaches the provider.
+- F-5: the request's abort signal now reaches the whole turn. When the client disconnects, the provider call is abandoned, no further tool is started, the request that already left is charged at its estimate and nothing stays held.
+- F-6: a turn that did not answer is no longer a `200`. The fixed fallback sentence stays in `answer`, and the body adds `error`, a machine-readable code: `429 provider_rate_limited` (with `Retry-After`), `502 provider_auth` / `provider_unavailable` / `provider_bad_output` / `provider_refused`, `504 provider_timeout` / `turn_timeout`, `503 budget_exhausted` / `backend_unavailable` / `provider_not_configured`. Provider text, prompts and credentials are never in the response, and only a safe subset is logged. Successful turns are unchanged.
+- O-1: the spending ledger stays fail-closed and now validates provider usage before recording it (not a number, infinite, negative, fractional, above explicit bounds, or above what the request could have used). A rejected figure is charged at the held estimate (never the wrong number, never zero) and blocks live calls until an operator clears it. A corrupt ledger file is refused, never treated as empty. New operator commands: `pnpm budget:status`, `budget:clear-halt` (reason and `--confirm`, evidence copy kept, event recorded) and `budget:start-over` (corrupt file only, explicit baseline from the provider's billing, original kept). Nothing resets the ledger automatically, including reaching the cap. `RUNBOOK` section 7, "Ledger recovery".
+- `record()` on the ledger takes optional per-request limits; `settle()` refuses nonsense figures; `settleUsage()` is the loop's way to settle.
+- Tests: 404 (356 API, 13 fake provider, 35 web client).
+
+### Not verified (still open)
+- No live Foundry call has been made for this branch. The scripted provider proves server behaviour for failures; it is not evidence of live-model behaviour.
+- The canonical roadmap and acceptance criteria are not in the repository. This changelog is the provisional scope.
+
 ### Not in this branch
 - Conversations, tools that change anything, RAG, and prompt-injection defences beyond labelling database text. They arrive in later episode branches.
 
@@ -58,11 +71,11 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - Evaluation: `pnpm eval:intent` over 40 frozen synthetic messages (19 Hinglish, 5 hard cases). A separate 8-message dev set is used for tuning. Failures count as wrong and are reported apart from a valid `other`. The dry run uses a stand-in model and checks the harness only; `--live` measures the real deployment and writes per-message results (outcome, tokens, cost, latency) to `.eval-runs/`.
 - Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed. The worst case estimates input tokens as the UTF-8 byte length of the prompt (a conservative estimate that does not undercount Devanagari, not a guaranteed bound), adds a fixed overhead and the full output cap, prices input and output separately, and refuses a model with no configured price.
 - `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
-- Tests: 110 (102 API, 8 fake provider), 41 of them new.
+- Tests: 278 (230 API, 13 fake provider, 35 web client).
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
-- CI runs on Node 24 (required) and Node 26 (an extra check that may fail without failing the workflow), and installs pnpm with npm because Node 25 and later have no corepack.
+- CI runs a Node 24 and Node 26 matrix; both jobs must pass (a failure on either fails the workflow), and pnpm is installed with npm because Node 25 and later have no corepack.
 - The classifier, the evaluator, the spending guard and `pnpm eval:intent` take their model, request options and price from the `ModelHandle` of the model boundary introduced on `ep00-start`; none of them names a provider. `.eval-runs` files record the model and the price row used.
 - The runbook is now for this branch; sections after the walkthrough moved down by one number.
 
@@ -70,8 +83,23 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - The PowerShell `Call` helper in the runbook sent a body with every request. Windows PowerShell 5.1 refuses a body on GET, so most walkthrough commands failed there with a `ConvertFrom-Json` error and `[0]`. It now sends a body only with POST and PUT, as UTF-8, and prints `[no response]` when the API is not running.
 
 ### Verified
-- Typecheck and 110 of 110 tests on Node 24 and Node 26.
+- Typecheck and 110 of 110 tests on Node 24 and Node 26 (the count at that time; the current count is in the remediation sections below).
 - On a local run: both new routes in bash and PowerShell, the dry-run evaluation (rules 24 of 40, hard cases 0 of 5).
+
+### Changed (remediation after the independent end-to-end review)
+- **EP-0's remediation is merged in**: the explicit startup decision (demo / live / off, one-line refusals, no uncaught exception; the template ships `LLM_PROVIDER` empty), the shared assist guard, and the web client fixes (panel layout, accessibility, favicon, required `VITE_API_URL` for production builds).
+- **`POST /assist/intent` now has the same protections as `/assist/triage`**, through the shared guard (`src/assist/guard.ts`): a per-user rate limit (`TRIAGE_RATE_LIMIT_PER_MIN`, its own quota on this route), and a bounded provider call (`TRIAGE_TIMEOUT_MS`, aborted at the timeout, no retries). In demo mode no LLM classifier is built, the keyword rules answer, and the response says `simulated: true`. Every response now has an explicit `simulated` field.
+- **Diagnosable failures.** A classification that produced no intent logs one structured warning: the outcome, a reason category, the provider's status, and its error code and request id when they look like identifiers. Never the customer's message, the model's output, provider text or a key. The client still sees only `assistant_unavailable`.
+- **Evaluation tooling** (the 40-message dataset is untouched and now pinned by SHA-256 in a test): per-intent precision and recall, failure and timeout rates, latency percentiles and a paired comparison; the output file records the prompt hash. `docs/evaluation/EP1_INTENT_EVAL_PLAN.md` is a **draft**: its decision rule needs thresholds only the owner can set, so the live evaluation has not been run.
+- Removed `apps/api/.vitest/json/output.json` (generated output from an ad-hoc run on another machine, committed by accident) and ignored `.vitest/`.
+
+### Fixed (remediation after the independent end-to-end review)
+- `cp .env.example .env` followed by starting the API failed on this branch even with `DEMO_MODE=1` (the provider was initialised before the demo check). Both now start.
+- A hung provider kept a `/assist/intent` request open indefinitely, and the route had no rate limit and ignored `DEMO_MODE`.
+
+### Verified (remediation, local only)
+- Typecheck, 278 of 278 tests (230 API, 13 fake provider, 35 web client), the production build and the bundle check, on Node 22, 24 and 26 against a local Postgres 16 without pgvector. CI results for these commits are reported separately, and are the only evidence for the pgvector image.
+- A real Chromium run against the real API and the production preview: see the review report. The live Foundry probe and the live intent evaluation were **not** run by this change.
 
 ### Not in this branch
 - Tools, the agent loop, conversations, RAG, refunds, and any action taken from a classification. They arrive in later episode branches.
@@ -104,7 +132,7 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - OpenTelemetry trace ID and request ID propagation on all API responses (`x-trace-id`, `x-request-id`).
 - Authenticated `POST /assist/triage` endpoint for the EP0 vertical slice, guarded by customer token verification and Zod validation.
 - ADR 0001 (`docs/adr/0001-ep0-visual-client-and-cors.md`) and independent review (`docs/reviews/EP0_INDEPENDENT_REVIEW.md`).
-- Tests: 173 (130 API, 13 fake provider, 30 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
+- Tests: 202 (154 API, 13 fake provider, 35 web client). Includes an adapter contract suite run once per provider against a recording stand-in for the Responses API (address, credentials, `store: false`, no reasoning, output cap, structured output, no ignored settings), provider selection rules, boundary test, and visual client tests.
 
 ### Changed (EP-0 remediation after the independent audit)
 - **No silent mock.** Without a provider, `POST /assist/triage` is `503 provider_not_configured`. `DEMO_MODE=1` (only `1` or `0`; empty is off; anything else refuses to start) returns answers marked `simulated: true` with `modelId: "demo-mock"`, and the client shows a SIMULATED badge. Every response now has an explicit `simulated` boolean. The hard-coded `gpt-5.4-mini` model name in the response is gone: it reports what the provider returned.
@@ -117,9 +145,17 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - **CI**: Node 24 and 26 matrix; adds `pnpm build` and the bundle check (`pnpm --filter @tadka/web check:bundle`).
 - Docs: RUNBOOK, README, `.env.example`, `apps/web/.env.example`, ADR 0001 section 6; the earlier in-repo review is marked historical.
 
+### Changed (EP-0 remediation, round 2: independent end-to-end review)
+- **Startup.** `.env.example` ships `LLM_PROVIDER` empty. The API decides once whether it is in demo, live or off mode (`src/assist/provider-mode.ts`): demo mode never reads provider settings, a provider that is chosen but incomplete (or unknown) is refused with one `Startup refused: ...` line and exit code 1 (no stack trace, no credential value), and nothing configured is a legitimate "model off" state. A present-but-empty setting takes its default and is never turned into 0. Tests start the real process from the parsed `.env.example`.
+- **Shared guard** (`src/assist/guard.ts`): the customer check, per-user limiter and provider timeout signal moved out of the triage route so another route can reuse them. No behaviour change for triage. Each route has its own per-user quota.
+- **Web client.** The developer panel no longer clips on phones (an inline `span 2` forced a second grid column); muted text colours meet WCAG AA; the diagnostics toggle is one native button; the page has a `<main>` landmark and a favicon. A production build requires `VITE_API_URL` (the localhost default is dev-only and is removed from production bundles); without it the page says what to set and sends nothing. The bundle check also asserts that.
+
+### Fixed (EP-0 remediation, round 2)
+- **`cp .env.example .env` and starting the API crashed** (an uncaught `LlmConfigError`), because the template chose `LLM_PROVIDER=azure` with blank credentials. This was in the baseline before the first remediation and was found by the independent review.
+
 ### Fixed (EP-0 remediation)
 - **The API and the fake provider did not exit on SIGTERM when tracing was on**, because the bare `SIGTERM` handler in `instrument.ts` replaced Node's default. Both now run one bounded shutdown for SIGTERM and SIGINT: stop the server, close the database (API), flush traces (3 s limit), exit; 8 s overall deadline, forced exit code 1 after it, whichever step hangs (tested for a stuck server close, a stuck stage in each position, and a trace backend that never answers); a repeated signal does not start a second shutdown. A request still running at the deadline is abandoned.
-- The root `pnpm dev` script now uses `--no-bail`, so Ctrl+C no longer makes pnpm kill the API and fake provider before they finish shutting down (Vite exits non-zero on Ctrl+C). SIGTERM sent to a pnpm process is still not forwarded to the apps by pnpm; start the `node` command directly under a process manager or container. RUNBOOK section 9 lists which launch commands give a graceful stop.
+- The root `pnpm dev` script now uses `--no-bail`, so Ctrl+C no longer makes pnpm kill the API and fake provider before they finish shutting down (Vite exits non-zero on Ctrl+C). SIGTERM sent to a pnpm process is still not forwarded to the apps by pnpm; start the `node` command directly under a process manager or container. RUNBOOK section 10 lists which launch commands give a graceful stop.
 
 ### Verified (EP-0 remediation, local, Node 22 only)
 - Typecheck, 173 of 173 tests, the web production build, the bundle check (demo credentials absent without `VITE_DEMO_LOGIN`, present with it) and the dry-run probe, on Node 22, 24 and 26 against a local Postgres 16 without pgvector.

@@ -9,13 +9,15 @@ import { seed, SEED_PASSWORD } from '../src/shared/seed-data.js';
 import { TEST_DB_URL } from './global-setup.js';
 
 // A real API against the test database and a real fake-PSP process on a random port.
-export async function startStack(opts: { classify?: IntentClassifier; assistant?: AssistantDeps } = {}) {
+// The assist routes are limited to 10 requests a minute per user in production. Tests that are not about the limiter
+// would trip it by calling a route many times as one user, so the default here is high; limiter tests set their own.
+export async function startStack(opts: { classify?: IntentClassifier; assistant?: AssistantDeps; rateLimitPerMin?: number; demo?: boolean } = {}) {
   const { db, pool } = createDb(TEST_DB_URL);
   await seed(db);
   const psp = buildFakePsp({ timeoutMs: 300 });
   const pspUrl = await psp.listen({ port: 0, host: '127.0.0.1' });
   const keys = await loadSigningKeys();
-  const app = buildApp({ db, keys, provider: new HttpPaymentProvider(pspUrl, 150), classify: opts.classify, assistant: opts.assistant });
+  const app = buildApp({ db, keys, provider: new HttpPaymentProvider(pspUrl, 150), classify: opts.classify, assistant: opts.assistant, demo: opts.demo, triageRateLimitPerMin: opts.rateLimitPerMin ?? 1000 });
   afterAll(async () => { await app.close(); await psp.close(); await pool.end(); });
 
   const login = async (email: string) => {

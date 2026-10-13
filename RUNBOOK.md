@@ -29,7 +29,7 @@ What you will see when it runs:
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
 | The naive tool leaking another customer's address, and the fix | Section 7 |
 | `POST /assist/chat`: a question answered with tools | Section 7 |
-| Comprehensive test suite across API, fake provider, and web client | `pnpm test` |
+| 404 passing tests (356 API + 13 fake provider + 35 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: conversations (each question stands alone), tools that change anything,
 RAG, and defences against prompt injection beyond labelling database text as data. Those arrive in later episode branches.
@@ -149,7 +149,7 @@ pnpm dev
 ```
 
 > **Before you open the browser page:** `.env` copies as `DEMO_MODE=0`, so the assistant has no model yet and answers
-> `503 provider_not_configured`. Pick one: add provider credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart `pnpm dev`
+> `503 provider_not_configured`. Pick one: add provider credentials (section 10), or set `DEMO_MODE=1` in `.env` and restart `pnpm dev`
 > for clearly labelled SIMULATED answers. Section 5 ("Recording a demo") says which to choose.
 
 ## 4. The commands, one by one
@@ -186,7 +186,7 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `DATABASE_URL` | `postgres://tadka:tadka_local@localhost:5544/tadka` | No, keep the default | Where the API finds Postgres. Matches `docker-compose.yml` |
 | `FAKE_PSP_URL` | `http://localhost:4010` | No, keep the default | Where the API finds the fake payment provider |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | No, keep the default | Where traces are sent. Empty it to run without tracing |
-| `LLM_PROVIDER` | `azure` | Only for `--live` and section 7 | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). See section 11 |
+| `LLM_PROVIDER` | empty | Only when you have credentials (for `--live`, `/assist/chat` and section 7) | Which provider to call: `azure` (Microsoft Foundry) or `openai` (direct API). **Leave it empty until you have credentials**: choosing a provider without its credentials stops the API at startup. See "What starts, and what refuses to start" below and section 10 |
 | `LLM_MODEL` | `gpt-5.4-mini` | No | The model the budget prices and the evaluations record. Not the Azure deployment name |
 | `AZURE_RESOURCE_NAME` | empty | With `LLM_PROVIDER=azure` | The name of your Azure resource. See section 11 |
 | `AZURE_API_KEY` | empty | With `LLM_PROVIDER=azure` | KEY 1 of that resource. See section 11 |
@@ -199,18 +199,30 @@ for `esbuild` and `protobufjs` in `pnpm-workspace.yaml`; neither needs one.
 | `ASSIST_ESTIMATE_MARGIN` | `1.25` | No | Safety margin on the cost estimate (section 7) |
 | `AUDIT_HMAC_KEY` | empty | No | Key for hashing order ids in the audit log. Empty means a new key each start (section 7) |
 | `DEMO_MODE` | `0` | No | `1`: `POST /assist/triage` returns SIMULATED answers and calls no model. `0` or empty: off. Anything else: the API refuses to start |
-| `TRIAGE_RATE_LIMIT_PER_MIN` | `10` | No | Requests per minute per signed-in user on `POST /assist/triage` |
-| `TRIAGE_TIMEOUT_MS` | `15000` | No | Longest the API waits for the model on one request |
+| `TRIAGE_RATE_LIMIT_PER_MIN` | `10` | No | Requests per minute per signed-in user, **per route**, on `POST /assist/triage` and on `POST /assist/intent` (each has its own quota). The name is historical; it covers both |
+| `TRIAGE_TIMEOUT_MS` | `15000` | No | Longest the API waits for the model on one request, on both routes. The call is aborted at that point |
 | `CORS_ORIGIN` | empty | No | One browser origin allowed to call the API. Empty = `http://localhost:5173` and `:4173` |
 | `SHUTDOWN_DEADLINE_MS` | `8000` | No (ops/test knob) | Overall time `Ctrl+C` / SIGTERM may take before the process is forced to exit |
 
-Everything except the provider credentials already works as copied. You can run the whole branch, including all tests and
-the dry-run probe, without filling anything in.
+The template as copied starts the whole branch: the API, the fake provider and the page, and all tests and the dry-run probe run.
+Without a provider the assistant is simply off (see the next paragraphs); nothing else needs filling in.
 
-**The browser assistant needs one of two things.** Either provider credentials (section 9), or `DEMO_MODE=1` in `.env`.
+**The browser assistant needs one of two things.** Either provider credentials (section 10), or `DEMO_MODE=1` in `.env`.
 With neither, `POST /assist/triage` answers `503 provider_not_configured`: the server never pretends to be a model.
 With `DEMO_MODE=1` every answer is marked `simulated: true`, carries `modelId: "demo-mock"`, and the page shows a SIMULATED badge.
-If you add real credentials, set `DEMO_MODE=0` (a real provider setting is ignored while demo mode is on).
+If you add real credentials, set `DEMO_MODE=0` (provider settings are not read at all while demo mode is on).
+
+**What starts, and what refuses to start.** The API decides once, at startup, from `DEMO_MODE` and `LLM_PROVIDER`:
+
+| `DEMO_MODE` | `LLM_PROVIDER` and credentials | Result |
+|---|---|---|
+| `1` | anything, even half filled | **Starts.** Simulated answers. Provider settings are not read and no provider is ever contacted |
+| `0` or empty | empty (the template) and no `AZURE_*` / `OPENAI_*` | **Starts, model off.** Triage is `503 provider_not_configured` |
+| `0` or empty | `azure` or `openai` with its credentials complete | **Starts, live model.** The log names the deployment |
+| `0` or empty | `azure` or `openai` **without** its credentials, or an unknown value, or a deployment not named like a GPT model | **Refuses to start**, exit code 1, one line such as `Startup refused: LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY`. It never prints a credential value |
+| any other value than `1`, `0` or empty | | **Refuses to start** (`DEMO_MODE must be "1" or "0" (or empty)`) |
+
+A setting that is present but empty (`TRIAGE_RATE_LIMIT_PER_MIN=`) takes its default; a wrong value (`TRIAGE_TIMEOUT_MS=soon`) refuses to start and names the setting.
 
 Do not set `PORT` in `.env`: the API (3000) and the fake provider (4010) both read it and would collide.
 Never paste your key into a chat, an issue or a commit.
@@ -273,7 +285,7 @@ Open `http://localhost:5173` in any browser while `pnpm dev` is running:
 
 | You want to show | Settings in `.env` | What the viewer sees |
 |---|---|---|
-| **A real model answering** | Provider credentials (section 9) and `DEMO_MODE=0` | No SIMULATED badge. The Developer Panel shows the model name the provider reported. Run `pnpm probe:llm -- --live` once first to prove the credentials work (it makes one paid call, about a tenth of a cent) |
+| **A real model answering** | Provider credentials (section 10) and `DEMO_MODE=0` | No SIMULATED badge. The Developer Panel shows the model name the provider reported. Run `pnpm probe:llm -- --live` once first to prove the credentials work (it makes one paid call, about a tenth of a cent) |
 | **The whole flow with no cloud account** | `DEMO_MODE=1` (credentials not needed) | A yellow **SIMULATED** badge on every answer and `demo-mock` as the model in the Developer Panel. The answer does not depend on the message. Say so on camera |
 | Neither | `DEMO_MODE=0`, no credentials | An error card: "No AI model is configured on the server" (`503 provider_not_configured`) |
 
@@ -284,8 +296,10 @@ Steps for a simulated recording:
 3. Submit a message. Check for the SIMULATED badge and `demo-mock` before you start recording.
 
 Notes: while `DEMO_MODE=1` a real provider setting is ignored, so set it back to `0` (or empty) when you want the real model.
-`pnpm dev` also runs the web page with its demo sign-in on. A production build of the page (`pnpm build`) has the demo sign-in off and cannot be used to
-record; for a recorded build of the page use `VITE_DEMO_LOGIN=1 pnpm --filter @tadka/web build`.
+`pnpm dev` also runs the web page with its demo sign-in on, and with the API at `http://localhost:3000`. A production build of the page (`pnpm build`)
+has the demo sign-in off and cannot be used to record. For a recorded build of the page, set both settings when you build, because they are compiled into the page:
+`VITE_DEMO_LOGIN=1 VITE_API_URL=http://localhost:3000 pnpm --filter @tadka/web build`, then `pnpm --filter @tadka/web preview` (it serves on port 4173, which the API allows).
+`VITE_API_URL` is **required** for every production build: without it the page has no API address, shows what to set, and sends nothing (it never falls back to `localhost`).
 
 Run these in a second terminal. First, a helper that logs in and prints a token:
 
@@ -454,7 +468,28 @@ When `pnpm dev` starts it prints one line:
 - `POST /assist/intent classifier: keyword rules: no LLM settings (set LLM_PROVIDER and its credentials)`: no key needed. The route uses the keyword rules.
 - `POST /assist/intent classifier: LLM (Foundry deployment gpt-5.4-mini, model gpt-5.4-mini)` or `LLM (OpenAI model gpt-5.4-mini)`: the provider in `LLM_PROVIDER` is configured in `.env` (section 11). The route uses that model, behind the spending guard.
 
-Every response says which one answered, in `"classifier": "rules"` or `"classifier": "llm"`.
+- `POST /assist/intent classifier: keyword rules (DEMO_MODE=1: no provider is used)`: demo mode. The provider settings are not read and the route never contacts a provider, even if credentials are in `.env`.
+
+Every response says which one answered, in `"classifier": "rules"` or `"classifier": "llm"`, and `"simulated": true` only in demo mode (where the keyword rules answer and nothing came from a model).
+
+### What `/assist/intent` does when something is wrong
+
+It is guarded exactly like `/assist/triage` (one shared guard, `src/assist/guard.ts`):
+
+| Situation | Answer |
+|---|---|
+| No token | `401 missing_token` or `invalid_token` |
+| Owner or admin token | `403 customers_only` |
+| A body with another field, an empty text, or more than 500 characters | `400 invalid_request` |
+| More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute from one user | `429 rate_limited` with `Retry-After`. Requests rejected above (401, 403) never use up anyone's quota; each user has their own |
+| The provider does not answer within `TRIAGE_TIMEOUT_MS` | `502 assistant_unavailable`. The call is aborted, so nothing keeps waiting |
+| Key rejected, rate limited by the provider, provider down, network failure, or the spending guard refused | `502 assistant_unavailable`. There is no retry |
+| Refusal, or output that is not a valid intent | `200` with `outcome: "refusal"` or `"invalid_output"` and the safe fallback; never a made-up intent and never `other` |
+
+The client only ever sees `assistant_unavailable` for a failed call. **The reason is in the server log**, as a line `assist/intent: no intent was produced` with
+`outcome`, `reason` (`provider_timeout`, `provider_auth`, `provider_rate_limited`, `provider_unavailable`, `budget`, `aborted`, `content_filter`, `no_object`...),
+the provider's status number and its error code and request id when they look like identifiers. The log never holds the customer's message, the model's output,
+provider text, keys or the resource name.
 
 ### Demo 1: no LLM at all
 
@@ -648,18 +683,34 @@ That file is for operators; it is git-ignored and never returned to a caller.
 
 Menu item names come from the database and are labelled `untrusted_data`. That label is not a defence against prompt injection; real defences arrive in a later episode.
 
-### Stop reasons
+### Stop reasons and HTTP statuses
 
-| `stopReason` | What happened | `answer` |
-|---|---|---|
-| `answered` | The model named the results that answer the question | Rendered from those results |
-| `clarify` | The question was unclear or not about orders or menus | A fixed question |
-| `invalid_output` | Prose instead of a tool call twice, unusable tool calls twice, or a result that does not exist | The safe fallback |
-| `refusal` | The provider filtered the request | The safe fallback |
-| `provider_error` | Timeout, bad key, quota or network | The safe fallback |
-| `step_limit`, `tool_call_limit`, `deadline` | A limit below was reached | The safe fallback |
-| `budget` | The spending guard stopped the next request before it was sent | The safe fallback |
-| `history_limit` | The request would have been larger than 32 KB | Rendered from the results gathered so far |
+A question the assistant answered is `200`. A question it could **not** answer is a failure: the response keeps the safe fallback
+sentence in `answer` (so a page can show it) but the status is not 2xx and `error` is a machine-readable code. The body of a failure is
+`{ "error": "<code>", "answer": "<fallback>", "stopReason": "...", "steps": [...] }`. Provider text, prompts and credentials are never in it.
+
+| `stopReason` | What happened | HTTP | `error` | `answer` |
+|---|---|---|---|---|
+| `answered` | The model named the results that answer the question | 200 | | Rendered from those results |
+| `answered` | ...but every result it named failed (a database or backend error) | 503 | `backend_unavailable` | `I couldn't fetch that right now...` |
+| `clarify` | The question was unclear or not about orders or menus | 200 | | A fixed question |
+| `invalid_output` | Prose instead of a tool call twice, unusable tool calls twice, or a result that does not exist | 502 | `provider_bad_output` | The safe fallback |
+| `step_limit`, `tool_call_limit` | The model kept asking for more than the limits allow | 502 | `provider_bad_output` | The safe fallback |
+| `refusal` | The provider filtered the request | 502 | `provider_refused` | The safe fallback |
+| `provider_error` | The provider failed | 429 `provider_rate_limited` (with `Retry-After`), 502 `provider_auth` or `provider_unavailable`, 504 `provider_timeout`, 503 `provider_not_configured` | as shown | The safe fallback |
+| `deadline` | The 20 s limit was reached while the provider was working | 504 | `provider_timeout` | The safe fallback |
+| `deadline` | ...while a database read was running | 504 | `turn_timeout` | The safe fallback |
+| `budget` | The spending guard stopped the next request before it was sent, or the ledger is blocked or unreadable | 503 | `budget_exhausted` | The safe fallback |
+| `history_limit` | The request would have been larger than 32 KB | 200 if results had been gathered (rendered from them), else 502 `provider_bad_output` | | |
+| `cancelled` | The client disconnected | (nobody is listening) | | |
+
+Other statuses of the route: `401` no or bad token, `403 customers_only` for an owner or admin token, `400 invalid_request`,
+`429 rate_limited` (with `Retry-After`) when one user asks more than `TRIAGE_RATE_LIMIT_PER_MIN` (10) times a minute, `503 assistant_not_configured`
+with no model (and always in `DEMO_MODE=1`, which never calls a provider). The limit is per verified user, in this process's memory; requests refused for
+authentication or role do not use any quota. It is abuse protection, not a spending cap.
+
+When the client disconnects (closes the tab, cancels the request), the provider call is abandoned and no further tool is started. The
+request that already left is charged at its estimate, so nothing stays held. A database query that is already running is not cancelled.
 
 The safe fallback is `Sorry, I can't answer that right now. You can check your orders on the Orders page.`
 
@@ -690,12 +741,63 @@ Before every request to the model the loop estimates its cost and refuses to sen
 | `ASSIST_TURN_BUDGET_USD` | `0.05` | One question |
 | `M0_BUDGET_USD` | `5` | Everything ever sent from this checkout, shared with the probe and the evaluation (`.m0-usage.json`) |
 
-After each request the actual usage the provider reports is charged. If a response has no usage, the estimate is charged, never zero.
-If the provider ever reports more than the estimate, the higher number is charged, a `estimator_violation` warning is logged, and the
-turn stops. If you see one, raise `ASSIST_ESTIMATE_MARGIN`.
+After each request the usage the provider reports is **checked before it is written down** (all in `src/assist/budget.ts`):
+
+| What the provider reported | What the ledger does |
+|---|---|
+| Nothing, or only one of the two figures | Charges the estimate, never zero. Carries on |
+| Whole numbers, 0 or more, within this request's own bounds (what the request could possibly have used) | Charges the real usage |
+| Not a number, infinite, negative, a fraction, above 1,000,000 input or 100,000 output tokens, or above this request's own bound | **Does not write the figure down.** Charges the estimate that was held for the request, records why on that entry, logs `usage_rejected` or `estimator_violation`, stops the turn, and **blocks every live call** until an operator has looked |
+
+A wrong number is never accounted as if it were true, and an unknown amount is never accounted as zero. While blocked, `/assist/chat` answers
+`503 budget_exhausted`, `/assist/intent` falls back as for a budget refusal, and nothing is sent to the provider. The ledger never lifts a block
+by itself: not on restart, and not when the cap is reached. If you see `estimator_violation` for a request that was really that large, raise
+`ASSIST_ESTIMATE_MARGIN` after you have checked it.
+
+A ledger file that cannot be read, or whose figures are not sane (invalid JSON, a negative cost, an unknown reservation state), is not treated as empty.
+Every spending path refuses (`budget: the ledger file ... is corrupt`) and the file is left exactly as it was.
 
 This guard protects this app's budget. It is not a promise about your bill, so also set a budget on your Azure subscription.
 The ledger file is safe for any number of processes on one machine; it is not shared between machines.
+
+### Ledger recovery (a block, or a corrupt file)
+
+Everything here is done by a person, with a reason, and keeps what it found. The application never does any of it.
+
+```bash
+pnpm budget:status          # spent, committed, BLOCKED since when and why, or CORRUPT
+```
+
+**Blocked** (`BLOCKED since ...: usage_rejected:...`). A usage figure from the provider was wrong. The request was charged at its estimate and
+live calls stopped. Before you lift it:
+
+1. Look up what the provider really charged for that time (Foundry resource, **Monitoring**, **Metrics**, or Cost Management). Keep a note of what you saw.
+2. If the real cost is higher than the estimate that was charged, settle the difference by running `pnpm budget:status` and `pnpm budget:reservations`, and
+   consider lowering `M0_BUDGET_USD` for the rest of the run: the ledger cannot add a charge by itself that you have not established.
+3. Lift the block, with a reason and an explicit confirmation:
+
+```bash
+pnpm budget:clear-halt -- --reason "Checked Foundry metrics for 12 Oct 14:02-14:05: 1,180 in / 96 out, matches the estimate" --confirm
+```
+
+This first saves a byte-for-byte copy of the ledger next to it (`.m0-usage.json.evidence-halt-cleared-<time>`, never overwritten), then removes only the block.
+The spending record is not changed, and the ledger's `events` list keeps the block, your reason and your user name.
+
+**Corrupt** (`CORRUPT: the ledger file ... is corrupt`). The file is not changed by anything. Do not edit it by hand and do not delete it: you would forget what was spent.
+
+1. Read the file (`cat .m0-usage.json`), and find the real total spent in your provider's billing.
+2. Start a new ledger from that figure. The corrupt file is moved aside and kept:
+
+```bash
+pnpm budget:start-over -- --baseline-spent-usd 1.37 --reason "File was truncated by a disk-full error; Foundry billing shows 1.37 USD" --confirm
+```
+
+There is no default baseline: `0` must be typed, and only if the provider's billing really shows nothing. The new ledger starts with one entry,
+`operator-baseline`, and a `restarted_from_corrupt` event pointing at the preserved file.
+
+The $5 cap is a spending guard for this app, not a promise about your bill: requests that are in flight together are each reserved before they are sent,
+but the provider can still bill a request whose answer was never received, and an unreadable ledger means nothing can be said about what was spent
+until you establish it. Also set a budget on your Azure subscription.
 
 ### A request that was sent but never charged
 
@@ -748,7 +850,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: fake-provider tests, API tests, and web client tests pass. Your dev database is never touched.
+Expected: 13 fake-provider tests, 356 API tests and 35 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -758,27 +860,33 @@ Expected: fake-provider tests, API tests, and web client tests pass. Your dev da
 | `payments.test.ts` (5) | Cross-user payment is refused, timeout is resolved by lookup, error then retry charges once, paying twice is a no-op, the money constraint |
 | `triage.test.ts` (6) | The LLM call returns a typed object, rejects a bad shape and passes the adapter's options through untouched; the budget guard refuses before sending; a provider and model with no price is refused, even if another provider has one; every price row names its source and date |
 | `llm-config.test.ts` (8) | Provider selection: `LLM_PROVIDER` decides; an explicit provider without credentials is an error that names variables, never values; Azure-only settings still work, with a warning; both providers present and no choice is refused; the Azure deployment name is kept apart from the model we price |
-| `llm-contract.test.ts` (16) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
+| `llm-contract.test.ts` (18) | The same checks once per provider, using the real factory and the real AI SDK with a recording stand-in for the network: correct address and credentials, no provider-side storage, no reasoning tokens, the output cap, temperature 0, structured output, no ignored settings, reasoning tokens charged once; a deployment name the SDK would not recognise is refused |
 | `llm-boundary.test.ts` (6) | Only `src/llm` imports a vendor SDK, builds a provider client or builds provider option objects; scripts get their model from the same factory |
 | `assist-order-status.test.ts` (4) | The no-LLM route: own order, someone else's is 404, no token is 401, a bad id is 400 |
 | `intent-rules.test.ts` (6) | The five-label schema rejects unknown labels and extra fields; the keyword rules, their documented blind spot (negation) and the dev set |
 | `intent-classifier.test.ts` (6) | Each outcome with a fake provider: ok, a valid `other`, invalid output (five shapes), refusal, provider errors; no retry; the cost guards are sent |
 | `assist-intent.test.ts` (11) | Customers only, no identity in the body, one/several/no active orders, a failing lookup is a 500, labels that must not act change nothing in the database, fallbacks per outcome, rules by default |
-| `intent-eval.test.ts` (10) | The frozen set (size, labels, no overlap with the dev set), the rules' stable score, failures counted as wrong, the budget guard stopping before a request is sent, the input estimate counting UTF-8 bytes, an unpriced model refused |
+| `intent-eval.test.ts` (18) | The frozen set (size, labels, no overlap with the dev set), **both frozen files pinned by SHA-256**, the rules' stable score, the new metrics (per-intent precision and recall, failure rates, latency percentiles, paired comparison) against hand-computed values, and the budget guard stopping before it sends |
+| `assist-intent-hardening.test.ts` (21) | `/assist/intent` against a fake provider that throws, hangs or answers badly, through the real classifier, route, limiter and logger: the timeout cuts a hung call off and the model sees the abort; the per-user limit (own quota, rejected requests use none); demo mode never calls the classifier; invalid and refused output; provider errors (401, 403, 429, 500, network, unexpected) with safe, useful logs and no retry |
+| `intent-startup.test.ts` (4) | The real process and `/assist/intent`: with a provider that RECORDS requests, demo mode with credentials makes zero provider calls (and a control shows the recorder catches a call outside demo mode); the template as copied answers from the keyword rules; a half-chosen provider still refuses to start |
 | `boundaries.test.ts` (6) | `assist` and its tools import only the public orders and restaurants services, nothing in `src` imports the demo, and no model output or tool schema has a field that can name a user |
 | `naive-tool-demo.test.ts` (2) | The naive tool leaks Aman's address into Rahul's chat; the real tool returns `not_found` |
 | `assist-reads.test.ts` (5) | Recent orders are newest first with a fixed tie-break, capped, with `hasMore`; a foreign order and an invented id give the same error and the same HTTP 404, and only an internal flag tells them apart; the menu is capped in a fixed order |
 | `tool-executor.test.ts` (10) | Allow-listed fields only; unknown tool, unparsable input, an extra `userId` and a bad id are `invalid_args` with no side effect; a tool not offered to the role looks like an unknown tool; a backend failure is `failed`; ordinary logs are identical for a foreign and an invented id while only the audit log records the difference; the result size cap |
+| `budget-safeguards.test.ts` (33) | Usage validation (NaN, infinite, negative, fractional, above the bounds), a rejected figure charged at the estimate and blocking live calls, the block surviving restart, the cap, concurrent reservations, every kind of corrupt file refused and left untouched, and the operator recovery (reason and confirmation required, evidence kept, nothing reset without a baseline) |
 | `budget-ledger.test.ts` (5) | Separate processes cannot reserve the same allowance; a crash after sending keeps the hold through a restart; a settle applies once, even when two run at the same time; released or unpriced is refused; a half-written temp file is harmless |
-| `agent-loop.test.ts` (29) | Multi-step answers from templates, model prose never shown, one result per call id when parallel calls finish out of order, partial failure, at most 3 at once, each limit on its own, the deadline for a slow tool and a slow model, the output cap on every request, every budget rule, the payload cap separate from the budget, no retry and no tool re-run after a provider error |
+| `agent-loop.test.ts` (51) | Multi-step answers from templates, model prose never shown, one result per call id when parallel calls finish out of order, partial failure, at most 3 at once, each limit on its own, the deadline for a slow tool and a slow model, the output cap on every request, every budget rule, the payload cap separate from the budget, no retry and no tool re-run after a provider error |
+| `assist-chat-failures.test.ts` (13) | `POST /assist/chat`: provider 429/401/500/503/timeout, prose, looping, database failure and the cap are 429/502/503/504 with a code, the fallback sentence and nothing from the provider; the per-user rate limit (401/403 use no quota, another user unaffected, a limited request never reaches the provider); an aborted HTTP request abandons the provider call; demo mode never calls the model |
 | `assist-chat.test.ts` (5) | `POST /assist/chat` end to end: own orders, Aman's order in Rahul's chat is not found with one audit event, an invented id, customers only, 503 without a model |
 | `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
+| `guard.test.ts` (7) | The shared guard for model-spending routes on a bare app: 401/403 never use quota, the limit is per verified user, each route has its own quota, Retry-After, the timeout signal |
+| `provider-mode.test.ts` (5) | The startup decision: demo never initialises the provider, live, off, and a chosen-but-incomplete provider is refused |
 | `assist-errors.test.ts` (15) | Provider failures (401, 403, 429, 500, 404, network, 504, bad output) become our own status and code; provider text, keys, resource names and the customer's message never reach the response or the log; a provider auth failure is not a 401; a hung call is cut off at the timeout and the model sees the abort |
-| `assist-access.test.ts` (14) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
-| `startup.test.ts` (8) | The real server process: no provider and no demo mode is `503 provider_not_configured`; `DEMO_MODE=1` is `simulated: true`; a bad `DEMO_MODE` refuses to start |
+| `assist-access.test.ts` (15) | Only customers may call triage (401 / 403 `forbidden_role`; the role comes from the verified token); the rate limit is per verified user and does not count rejected requests; `simulated` is explicit; `DEMO_MODE` and limit settings are parsed strictly |
+| `startup.test.ts` (19) | The real server process, started with the command from `package.json`: from the parsed `.env.example` as copied (model off, honest 503), with `DEMO_MODE=1`, with a half-filled provider in demo mode (still starts), and the live refusals (provider chosen without its key, unknown provider, bad deployment name, bad numeric setting): exit code 1, one line, no stack trace, no credential value |
 | `shutdown.test.ts` (20) | The shutdown sequence (order, a failing stage, a hang in each stage position, a stage finishing after the deadline, repeated signals, the root `--no-bail` setting) and the real process with telemetry off, on and refused, with a server close stuck on an unfinished request, and with a trace backend that never answers |
 | `fake-psp/test/shutdown.test.ts` (5) | The same shutdown contract for the fake provider |
-| `web/test/*.test.ts(x)` (30) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
+| `web/test/*.test.ts(x)` (35) | The client: demo sign-in on and off, the SIMULATED badge, error wording per code, malformed responses, cancel, client timeout, the token is sent only when there is one |
 | `fake-psp/test/idempotency.test.ts` (8) | Key required, replay, key reuse with a different body, concurrent requests, timed-out and errored charges, final declines, refund cap |
 
 ## 11. The LLM probe
@@ -814,7 +922,8 @@ The error text is always ours. Provider messages, keys, resource names and the c
 
 What the limits are, and are not:
 - The rate limit is basic abuse protection. It lives in the API process's memory, so it resets on restart and is not shared between several instances.
-- **The `M0_BUDGET_USD` ledger does not apply to this route.** It guards only `pnpm probe:llm -- --live`. The HTTP route is bounded by the rate limit, the 500-character input, the 400-token output cap and `maxRetries: 0`; there is no hard money cap.
+- **The `M0_BUDGET_USD` ledger does not apply to `/assist/triage`.** It guards `pnpm probe:llm -- --live`, `pnpm eval:intent --live` and the LLM classifier behind `/assist/intent` (section 6). Triage is bounded by the rate limit, the 500-character input, the 400-token output cap and `maxRetries: 0`; there is no hard money cap on it.
+- **The ledger can under-count.** It adds a call's cost only when the provider reports usage. A call that times out or fails without a usage report is not added, so the ledger is not a hard cap; the provider's own spending limit is.
 - The timeout aborts the call at the AI SDK / `fetch` boundary (proved against a stand-in for the network). Whether a live Foundry request is cancelled on the provider's side has not been checked.
 
 Stopping the servers is bounded: the API and the fake provider stop accepting requests, close the database (API only),
@@ -913,7 +1022,7 @@ A good run prints JSON with `"mode": "live"`, your `model` and the price row it 
 
 | Message or symptom | Likely cause | Fix |
 |---|---|---|
-| `LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | A value is empty or `.env` is not in the repository root | Fill both, save, run again from the repository root |
+| `Startup refused: LLM_PROVIDER=azure needs AZURE_RESOURCE_NAME and AZURE_API_KEY` | You chose a provider but a credential is empty, or `.env` is not in the repository root | Fill both and run again from the repository root; or empty `LLM_PROVIDER` to run without a model (add `DEMO_MODE=1` for simulated answers) |
 | `AZURE_DEPLOYMENT "..." is not named like a GPT model` | The deployment has a name the AI SDK cannot recognise | Create or choose a deployment named like `gpt-5.4-mini` |
 | `Nothing was sent. budget: no price configured for ...` | This provider and model have no price row | Add one in `apps/api/src/llm/pricing.ts` (section 11, Switch provider) |
 | 401 (access denied) | Wrong or regenerated key | Copy KEY 1 again |
@@ -945,11 +1054,11 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `command not found` or `is not recognized` for `pnpm`, `node`, `jq` or `docker` | The program is not installed, or the terminal was opened before it was installed | Open a new terminal, then check with the list at the end of section 2 |
 | `pnpm dev` says `classifier: keyword rules` but you expected the LLM | The provider settings are empty in `.env` (the log line says what is missing), or `.env` is not in the repository root | Set `LLM_PROVIDER` and its credentials, then restart `pnpm dev` (section 4) |
 | `pnpm dev` exits with `LLM_PROVIDER=... needs ...` or `Both Azure and OpenAI settings are present` | The provider choice is incomplete or ambiguous | Fix `.env` as the message says, or clear the LLM settings to use the keyword rules |
-| `POST /assist/intent` returns `{"error":"assistant_unavailable"} [502]` | The model call failed: wrong key or deployment name, quota, network, or the spending guard refused | Check the provider settings in `.env`; check `.m0-usage.json` against `M0_BUDGET_USD`; try `pnpm probe:llm -- --live` |
+| `POST /assist/intent` returns `{"error":"assistant_unavailable"} [502]` | The model call failed: wrong key or deployment name, quota, a timeout, network, or the spending guard refused | Read the server log line `assist/intent: no intent was produced`: its `reason` and `providerStatus` say which. Then check the provider settings in `.env`, `.m0-usage.json` against `M0_BUDGET_USD`, and try `pnpm probe:llm -- --live` |
 | `pnpm eval:intent --live` ends with `budget_stop` rows | A run or ledger cap would have been crossed, so the remaining requests were not sent | Raise `EVAL_BUDGET_USD` or `M0_BUDGET_USD` on purpose, or delete nothing and read the totals in the output |
 | `POST /assist/chat` returns `{"error":"assistant_not_configured"} [503]` | No model is configured | Fill the credentials for your `LLM_PROVIDER` in `.env`, then restart `pnpm dev` (section 11) |
-| `POST /assist/chat` always answers with `"stopReason":"budget"` | The question's estimate is over `ASSIST_TURN_BUDGET_USD`, the ledger is near `M0_BUDGET_USD`, or your provider and model have no price row | Check those three settings (section 7); `pnpm budget:reservations` shows what is spent and held |
-| `POST /assist/chat` answers with `"stopReason":"provider_error"` | Wrong key or deployment name, quota, or network | Try `pnpm probe:llm -- --live` first (section 11) |
+| `POST /assist/chat` always answers `503` with `"error":"budget_exhausted"` | The question's estimate is over `ASSIST_TURN_BUDGET_USD`, the ledger is near `M0_BUDGET_USD`, or your provider and model have no price row | Check those three settings, and `pnpm budget:status` for a BLOCKED or CORRUPT ledger (section 7, Ledger recovery); `pnpm budget:reservations` shows what is spent and held |
+| `POST /assist/chat` answers `502`, `504` or `429` with `"stopReason":"provider_error"` (or `deadline`) | Wrong key or deployment name, quota, or network | Try `pnpm probe:llm -- --live` first (section 11) |
 | `budget: ... sent request(s) were never settled` when `pnpm dev` starts | The API stopped between sending a request and charging it | Settle them as described in section 7 |
 | `Unsupported engine` or a Node error | Wrong Node version | `node -v` must print v24 or v26; install Node 24 (section 2) |
 | `corepack` is not recognized | Node 25 and later no longer include corepack | Skip corepack and run `npm install -g pnpm@12.11.2` |
@@ -958,8 +1067,9 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | `LLM_PROVIDER=azure needs AZURE_...` (a message that names variables) | `--live` without that provider's credentials | Fill them in `.env` (section 11) |
 | No traces in Jaeger | Jaeger is not running, or `OTEL_EXPORTER_OTLP_ENDPOINT` is empty | Start with `--profile observability`; check `.env` |
 | PowerShell prints `ConvertFrom-Json : Cannot bind argument to parameter 'InputObject' because it is null` and `[0]` | The `Call` helper from an older copy of this runbook sent a body with GET requests, which Windows PowerShell 5.1 refuses | Paste the `Call` and `Login` helpers from section 5 again |
-| The browser says "No AI model is configured on the server" (`503 provider_not_configured`) | No provider credentials, and `DEMO_MODE` is off | Add credentials (section 9), or set `DEMO_MODE=1` in `.env` and restart |
+| The browser says "No AI model is configured on the server" (`503 provider_not_configured`) | No provider credentials, and `DEMO_MODE` is off | Add credentials (section 10), or set `DEMO_MODE=1` in `.env` and restart |
 | The page says "Not signed in. The demo sign-in is switched off" | The client was built without `VITE_DEMO_LOGIN=1` (a production build) | Use `pnpm dev`, or build with `VITE_DEMO_LOGIN=1` |
+| The page says "This build has no API address" | A production build was made without `VITE_API_URL` | Rebuild with `VITE_API_URL` set to the API's address (for local use `http://localhost:3000`) |
 | `DEMO_MODE must be "1" or "0"` at start | `DEMO_MODE` has another value (`true`, `yes`) | Use `1`, `0` or leave it empty |
 | `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |

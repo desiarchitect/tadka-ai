@@ -40,8 +40,9 @@ describe('budget ledger', () => {
 
   it('records actual cost from usage', () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'm0-')), 'usage.json'), 5);
-    expect(ledger.record('azure:gpt-5.4-mini', 1_000_000, 1_000_000)).toBeCloseTo(5.25);
-    expect(ledger.spent()).toBeCloseTo(5.25);
+    // at the explicit upper bounds for one request (USAGE_BOUNDS): 1M input and 100k output tokens
+    expect(ledger.record('azure:gpt-5.4-mini', 1_000_000, 100_000)).toBeCloseTo(1.2);
+    expect(ledger.spent()).toBeCloseTo(1.2);
   });
 
   it('refuses a provider and model pair with no price, before anything is sent, even when another provider has one', () => {

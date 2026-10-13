@@ -6,6 +6,8 @@ type UserOption = DemoUser | 'none';
 
 interface AuthStatusProps {
   demoLogin: boolean;
+  /** false: this build has no API address (a production build without VITE_API_URL). */
+  apiConfigured?: boolean;
   currentUser: UserOption;
   userEmail: string | null;
   onSelectUser: (user: UserOption) => void;
@@ -14,6 +16,7 @@ interface AuthStatusProps {
 
 export const AuthStatus: React.FC<AuthStatusProps> = ({
   demoLogin,
+  apiConfigured = true,
   currentUser,
   userEmail,
   onSelectUser,
@@ -24,7 +27,7 @@ export const AuthStatus: React.FC<AuthStatusProps> = ({
       <section className="auth-bar" aria-label="Authentication Controls">
         <div className="auth-info">
           <span className="auth-badge unauthenticated" role="status">
-            &#9675; Not signed in. The demo sign-in is switched off in this build.
+            &#9675; Not signed in. {apiConfigured ? 'The demo sign-in is switched off in this build.' : 'This build has no API address configured.'}
           </span>
         </div>
       </section>

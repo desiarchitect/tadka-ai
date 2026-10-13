@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { generateText, jsonSchema, tool, ToolChoiceViolationError, type LanguageModel, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { isPriced } from '../llm/pricing.js';
+import { classifyProviderError, safeErrorFields } from './errors.js';
 import type { ProviderOptions } from '../llm/types.js';
 import type { Principal } from '../shared/principal.js';
 import { BudgetLedger } from './budget.js';
@@ -19,8 +20,24 @@ import { CLARIFY, FALLBACK, renderAll, type ClarifyReason } from './templates.js
 import { executeToolCall, type ExecutorDeps, type ModelResult, type PublicStatus, type ToolCallRequest } from './tools/executor.js';
 import { TOOLS } from './tools/registry.js';
 
-export type StopReason = 'answered' | 'clarify' | 'step_limit' | 'tool_call_limit' | 'deadline' | 'budget' | 'history_limit' | 'invalid_output' | 'refusal' | 'provider_error';
-export type TurnResult = { answer: string; stopReason: StopReason; steps: { tool: string; status: PublicStatus }[]; requests: number; estimatedUsd: number; chargedUsd: number };
+export type StopReason = 'answered' | 'clarify' | 'step_limit' | 'tool_call_limit' | 'deadline' | 'budget' | 'history_limit' | 'invalid_output' | 'refusal' | 'provider_error' | 'cancelled';
+/**
+ * Set whenever the turn did NOT produce an answer. `answer` is then only the fixed, safe fallback sentence, which the UI may
+ * show, but the turn is a failure and the route reports it with this HTTP status and this machine-readable code (never with
+ * provider text). Absent: the turn answered (or asked a clarifying question) and is a 200.
+ */
+export type TurnFailure = { status: number; code: string; retryAfterSec?: number };
+export type TurnResult = { answer: string; stopReason: StopReason; steps: { tool: string; status: PublicStatus }[]; requests: number; estimatedUsd: number; chargedUsd: number; failure?: TurnFailure };
+
+// Application-owned failure codes. 502/503/504 follow the same conventions as /assist/triage (src/assist/errors.ts).
+const F = {
+  budget: { status: 503, code: 'budget_exhausted' },
+  providerTimeout: { status: 504, code: 'provider_timeout' },
+  turnTimeout: { status: 504, code: 'turn_timeout' },
+  badOutput: { status: 502, code: 'provider_bad_output' },
+  refused: { status: 502, code: 'provider_refused' },
+  backend: { status: 503, code: 'backend_unavailable' },
+} as const satisfies Record<string, TurnFailure>;
 export type LoopConfig = {
   priceKey: string; // provider:model, from the ModelHandle; a pair with no price means nothing is sent
   maxOutputTokens: number;
@@ -34,7 +51,11 @@ export type LoopConfig = {
 };
 export const DEFAULT_LOOP: Omit<LoopConfig, 'priceKey' | 'maxOutputTokens' | 'turnBudgetUsd' | 'estimateMargin'> =
   { maxSteps: 6, maxToolCalls: 8, parallel: 3, deadlineMs: 20_000, maxPayloadBytes: 32 * 1024 };
-export type LoopEvent = { event: 'estimator_violation'; estimateTokens: number; inputTokens: number; outputTokens: number; payloadBytes: number };
+export type LoopEvent =
+  | { event: 'estimator_violation'; estimateTokens: number; inputTokens: number; outputTokens: number; payloadBytes: number }
+  | { event: 'usage_rejected'; reason: string; payloadBytes: number }
+  | ({ event: 'provider_error' } & ReturnType<typeof safeErrorFields>)
+  | { event: 'ledger_unavailable'; reason: string };
 // `providerOptions` come from the provider adapter in src/llm and are passed through untouched.
 export type LoopDeps = { model: LanguageModel; providerOptions: ProviderOptions; executor: ExecutorDeps; ledger: BudgetLedger; config: LoopConfig; log: (e: LoopEvent) => void };
 
@@ -73,40 +94,59 @@ export function estimateRequest(messages: ModelMessage[], c: LoopConfig) {
 }
 
 class DeadlineError extends Error {}
+class CancelledError extends Error {}
 
-export async function runTurn(deps: LoopDeps, p: Principal, text: string): Promise<TurnResult> {
+/** `external` aborts the whole turn (the client went away): the provider call is abandoned and no tool is started. */
+export async function runTurn(deps: LoopDeps, p: Principal, text: string, external?: AbortSignal): Promise<TurnResult> {
   const c = deps.config;
   const turnId = randomUUID();
   const started = Date.now();
   const remaining = () => c.deadlineMs - (Date.now() - started);
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), c.deadlineMs);
+  const cancelled = () => external?.aborted === true;
+  const onExternalAbort = () => abort.abort();
+  external?.addEventListener('abort', onExternalAbort, { once: true });
+  const gone = new Promise<never>((_, reject) => {
+    if (cancelled()) reject(new CancelledError());
+    else external?.addEventListener('abort', () => reject(new CancelledError()), { once: true });
+  });
+  gone.catch(() => undefined); // only awaited through a race: never an unhandled rejection
   const beforeDeadline = <T>(work: Promise<T>) => {
     let t: NodeJS.Timeout | undefined;
     const late = new Promise<never>((_, reject) => { t = setTimeout(() => reject(new DeadlineError()), Math.max(0, remaining())); });
-    return Promise.race([work, late]).finally(() => clearTimeout(t));
+    return Promise.race([work, late, gone]).finally(() => clearTimeout(t));
   };
 
   const messages: ModelMessage[] = [{ role: 'user', content: text }];
   const results = new Map<string, { tool: string; result: ModelResult }>(); // by resultId
   const steps: TurnResult['steps'] = [];
   let toolCalls = 0, malformedInARow = 0, requests = 0, estimatedUsd = 0, chargedUsd = 0;
-  const stop = (stopReason: StopReason, answer = FALLBACK): TurnResult => ({ answer, stopReason, steps, requests, estimatedUsd, chargedUsd });
+  const stop = (stopReason: StopReason, answer = FALLBACK, failure?: TurnFailure): TurnResult =>
+    ({ answer, stopReason, steps, requests, estimatedUsd, chargedUsd, ...(failure ? { failure } : {}) });
+  // The ledger can refuse (full, blocked pending an operator, corrupt file, unpriced model): every one of those is "no spending".
+  const ledger = <T>(work: () => T): T | undefined => {
+    try { return work(); } catch (e) { deps.log({ event: 'ledger_unavailable', reason: (e as Error).name }); return undefined; }
+  };
+  // The request already left, so its cost is charged at the estimate. If even that cannot be written, the ledger is unusable.
+  const chargeEstimate = (id: string): number => ledger(() => deps.ledger.settle(id, 'estimate', 'estimate')) ?? 0;
 
   try {
-    if (!isPriced(c.priceKey) || !(c.maxOutputTokens > 0)) return stop('budget'); // fail closed
+    if (cancelled()) return stop('cancelled');
+    if (!isPriced(c.priceKey) || !(c.maxOutputTokens > 0)) return stop('budget', FALLBACK, F.budget); // fail closed
     for (let step = 0; step < c.maxSteps; step++) {
       // 1. Payload size, in bytes. Separate from money.
       const est = estimateRequest(messages, c);
       if (est.payloadBytes > c.maxPayloadBytes) {
         const shown = [...results.values()].filter((r) => r.result.status !== 'invalid_args');
-        return stop('history_limit', shown.length ? renderAll(shown) : FALLBACK);
+        return shown.length ? stop('history_limit', renderAll(shown)) : stop('history_limit', FALLBACK, F.badOutput);
       }
       // 2. Money: the turn cap, then an atomic reservation in the shared ledger.
-      if (remaining() <= 0) return stop('deadline');
-      if (chargedUsd + est.usd > c.turnBudgetUsd) return stop('budget');
-      const reservation = deps.ledger.reserve(c.priceKey, est.usd, turnId);
-      if (!reservation) return stop('budget');
+      if (cancelled()) return stop('cancelled');
+      if (remaining() <= 0) return stop('deadline', FALLBACK, F.turnTimeout);
+      if (chargedUsd + est.usd > c.turnBudgetUsd) return stop('budget', FALLBACK, F.budget);
+      const reservation = ledger(() => deps.ledger.reserve(c.priceKey, est.usd, turnId));
+      if (!reservation) return stop('budget', FALLBACK, F.budget);
       estimatedUsd += est.usd;
 
       deps.ledger.markSent(reservation);
@@ -120,27 +160,34 @@ export async function runTurn(deps: LoopDeps, p: Principal, text: string): Promi
         }));
       } catch (err) {
         // No usage comes back with an error: charge the estimate.
-        chargedUsd += deps.ledger.settle(reservation, 'estimate', 'estimate');
+        chargedUsd += chargeEstimate(reservation);
+        if (cancelled() || err instanceof CancelledError) return stop('cancelled');
         if (ToolChoiceViolationError.isInstance(err)) {
           // The model answered in prose instead of calling a tool. That text is never shown.
-          if (err.finishReason === 'content-filter') return stop('refusal');
-          if (++malformedInARow >= 2) return stop('invalid_output');
+          if (err.finishReason === 'content-filter') return stop('refusal', FALLBACK, F.refused);
+          if (++malformedInARow >= 2) return stop('invalid_output', FALLBACK, F.badOutput);
           messages.push({ role: 'assistant', content: '(answered without a tool call)' }, { role: 'user', content: REMIND });
           continue;
         }
-        return stop(err instanceof DeadlineError || abort.signal.aborted ? 'deadline' : 'provider_error');
+        if (err instanceof DeadlineError || abort.signal.aborted) return stop('deadline', FALLBACK, F.providerTimeout);
+        const classified = classifyProviderError(err);
+        deps.log({ event: 'provider_error', ...safeErrorFields(err, classified?.message ?? 'provider_unavailable') });
+        return stop('provider_error', FALLBACK, classified ? { status: classified.status, code: classified.message, ...(classified.retryAfterSec ? { retryAfterSec: classified.retryAfterSec } : {}) } : { status: 502, code: 'provider_unavailable' });
       }
-      const { inputTokens, outputTokens } = r.usage;
-      if (typeof inputTokens === 'number' && typeof outputTokens === 'number') {
-        chargedUsd += deps.ledger.settle(reservation, { inputTokens, outputTokens }, 'usage');
-        if (inputTokens > est.inputTokens || outputTokens > c.maxOutputTokens) {
-          deps.log({ event: 'estimator_violation', estimateTokens: est.inputTokens, inputTokens, outputTokens, payloadBytes: est.payloadBytes });
-          return stop('budget');
+      // The ledger decides whether the reported usage may be believed (missing: charged at the estimate; malformed or
+      // implausible: charged at the estimate and live calls blocked until an operator looks). See BudgetLedger.settleUsage.
+      const settled = ledger(() => deps.ledger.settleUsage(reservation, r.usage, { maxInputTokens: est.inputTokens, maxOutputTokens: c.maxOutputTokens }));
+      if (!settled) return stop('budget', FALLBACK, F.budget);
+      chargedUsd += settled.costUsd;
+      if (!settled.accepted) {
+        if (settled.reason === 'above_request_bound') {
+          deps.log({ event: 'estimator_violation', estimateTokens: est.inputTokens, inputTokens: Number(r.usage.inputTokens), outputTokens: Number(r.usage.outputTokens), payloadBytes: est.payloadBytes });
+        } else {
+          deps.log({ event: 'usage_rejected', reason: settled.reason ?? 'unknown', payloadBytes: est.payloadBytes });
         }
-      } else {
-        chargedUsd += deps.ledger.settle(reservation, 'estimate', 'estimate'); // missing usage is never zero
+        return stop('budget', FALLBACK, F.budget);
       }
-      if (r.finishReason === 'content-filter') return stop('refusal');
+      if (r.finishReason === 'content-filter') return stop('refusal', FALLBACK, F.refused);
 
       // 3. What did the model ask for?
       const calls = r.toolCalls;
@@ -151,25 +198,29 @@ export async function runTurn(deps: LoopDeps, p: Principal, text: string): Promi
         if (f.success && f.data.kind === 'present' && f.data.resultIds.length && f.data.clarifyReason === 'none') {
           const named = f.data.resultIds.map((id) => results.get(id));
           // Naming a result that doesn't exist, or one that was rejected, is invalid output.
-          if (named.some((n) => !n || n.result.status === 'invalid_args')) return stop('invalid_output');
-          return stop('answered', renderAll(named as { tool: string; result: ModelResult }[]));
+          if (named.some((n) => !n || n.result.status === 'invalid_args')) return stop('invalid_output', FALLBACK, F.badOutput);
+          const shown = named as { tool: string; result: ModelResult }[];
+          // Every result the model asked to show failed (a database or backend error): the sentence is safe to show, but nothing was answered.
+          return stop('answered', renderAll(shown), shown.every((n) => n.result.status === 'failed') ? F.backend : undefined);
         }
-        if (++malformedInARow >= 2) return stop('invalid_output');
+        if (++malformedInARow >= 2) return stop('invalid_output', FALLBACK, F.badOutput);
         messages.push(assistantCalls(calls), toolResults(calls.map((x) => ({ callId: x.toolCallId, tool: x.toolName, value: { status: 'invalid_args', reason: 'schema' } }))));
         continue;
       }
 
       // 4. Data tools. The cap counts every call the model asks for, valid or not.
       const dataCalls = calls.filter((x) => x.toolName !== 'final_answer');
-      if (toolCalls + dataCalls.length > c.maxToolCalls) return stop('tool_call_limit');
+      if (toolCalls + dataCalls.length > c.maxToolCalls) return stop('tool_call_limit', FALLBACK, F.badOutput);
       toolCalls += dataCalls.length;
       const requested: ToolCallRequest[] = dataCalls.map((x) => ({ callId: x.toolCallId, tool: x.toolName, input: x.input, unparsable: x.invalid === true && typeof x.input === 'string' }));
-      let deadlineHit = false;
+      let deadlineHit = false, cancelledHit = false;
       const outcomes = await pool(requested, c.parallel, async (req) => {
         try {
+          // Once the turn is over (deadline, or the client went away) no further tool is started.
+          if (abort.signal.aborted) throw cancelled() ? new CancelledError() : new DeadlineError();
           return await beforeDeadline(executeToolCall(deps.executor, p, req));
-        } catch {
-          deadlineHit = true; // the late result, if it ever comes, is discarded
+        } catch (e) {
+          if (e instanceof CancelledError) cancelledHit = true; else deadlineHit = true; // the late result, if it ever comes, is discarded
           return { callId: req.callId, tool: req.tool, status: 'failed', publicStatus: 'failed', modelResult: { status: 'failed' } } as const;
         }
       });
@@ -181,14 +232,16 @@ export async function runTurn(deps: LoopDeps, p: Principal, text: string): Promi
         return { callId: o.callId, tool: o.tool, value: { resultId, ...o.modelResult } };
       });
       if (final) replies.push({ callId: final.toolCallId, tool: 'final_answer', value: { status: 'invalid_args', reason: 'schema' } });
-      if (deadlineHit) return stop('deadline');
+      if (cancelledHit || cancelled()) return stop('cancelled');
+      if (deadlineHit) return stop('deadline', FALLBACK, F.turnTimeout);
       malformedInARow = outcomes.every((o) => o.publicStatus === 'invalid_args') ? malformedInARow + 1 : 0;
-      if (malformedInARow >= 2) return stop('invalid_output');
+      if (malformedInARow >= 2) return stop('invalid_output', FALLBACK, F.badOutput);
       messages.push(assistantCalls(calls), toolResults(replies));
     }
-    return stop('step_limit');
+    return stop('step_limit', FALLBACK, F.badOutput);
   } finally {
     clearTimeout(timer);
+    external?.removeEventListener('abort', onExternalAbort);
   }
 }
 

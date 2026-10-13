@@ -195,3 +195,20 @@ describe('Tadka Visual Client, demo sign-in OFF (a production build)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('Tadka Visual Client, a production build made without VITE_API_URL', () => {
+  it('says what is missing, disables the form and sends nothing, even with the demo sign-in switched on', async () => {
+    vi.stubEnv('VITE_DEMO_LOGIN', '1');
+    vi.stubEnv('VITE_API_URL', '');
+    vi.stubEnv('DEV', false);
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    render(<App />);
+    await screen.findAllByText(/no API address/i);
+    expect(screen.getByText(/VITE_API_URL=https:\/\/api\.example\.com/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Submit to Assistant/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Sign in as/i })).not.toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

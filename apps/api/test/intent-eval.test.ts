@@ -1,11 +1,12 @@
 // EP1 step 5: the frozen set, the evaluator and its budget guard. No model, no cost.
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BudgetLedger } from '../src/assist/budget.js';
 import type { ClassifyResult } from '../src/assist/classifier.js';
-import { EvalBudget, runEval, summarize, type EvalMessage } from '../src/assist/eval.js';
+import { EvalBudget, pairedComparison, runEval, summarize, type EvalMessage, type EvalRow } from '../src/assist/eval.js';
 import { worstCaseInputTokens } from '../src/assist/classifiers.js';
 import { classifyWithRules, INTENTS } from '../src/assist/intent.js';
 
@@ -112,5 +113,70 @@ describe('the worst-case input bound', () => {
     const ledger = new BudgetLedger(join(mkdtempSync(join(tmpdir(), 'ep1-')), 'usage.json'), 5);
     expect(() => ledger.assertAffordable('azure:gpt-unknown', 100, 100)).toThrow(/no price configured/);
     expect(() => ledger.assertAffordable('openai:gpt-5.4-mini', 100, 100)).toThrow(/no price configured/);
+  });
+});
+
+// The frozen sets are pinned by hash. Any edit, however small (a typo fix, a relabel, an added message), changes the hash
+// and fails this test, so "the dataset did not change" is checked by the tests, not promised. A deliberate new dataset
+// version means a new file, a new version string and a new preregistration, never an edit of these.
+describe('the frozen datasets are unchanged', () => {
+  const sha = (file: string) => createHash('sha256').update(readFileSync(new URL(`../eval/${file}`, import.meta.url))).digest('hex');
+  it('intents.eval.json (eval-1) has the pinned SHA-256', () => {
+    expect(sha('intents.eval.json')).toBe('a4c7f86df7b540586e8de33e1cb2cc705e1043290105247e9d0edba06aa53083');
+  });
+  it('intents.dev.json (dev-1) has the pinned SHA-256', () => {
+    expect(sha('intents.dev.json')).toBe('f1c1a469204a98cf09cb3127aa0c631c937d662bb91c9194c2a1b7bcc61f7ff4');
+  });
+});
+
+describe('summarize: the metrics the preregistered plan asks for', () => {
+  const row = (expected: EvalRow['expected'], predicted: EvalRow['predicted'], extra: Partial<EvalRow> = {}): EvalRow => ({
+    text: `${expected}-${predicted}-${Math.random()}`, expected, lang: 'en', hard: false, outcome: predicted ? 'ok' : 'provider_error', predicted, correct: predicted === expected,
+    latencyMs: 10, inputTokens: 100, outputTokens: 5, costUsd: 0.0001, ...extra,
+  });
+  // 6 messages. true labels: 3 order_status, 2 cancel_order, 1 other.
+  // answers: os->os, os->cancel, os->(timeout), cancel->cancel, cancel->os, other->(refusal)
+  const rows: EvalRow[] = [
+    row('order_status', 'order_status', { latencyMs: 10 }), row('order_status', 'cancel_order', { latencyMs: 20 }),
+    row('order_status', undefined, { outcome: 'provider_error', reason: 'provider_timeout', latencyMs: 15000 }),
+    row('cancel_order', 'cancel_order', { latencyMs: 30 }), row('cancel_order', 'order_status', { latencyMs: 40 }),
+    row('other', undefined, { outcome: 'refusal', reason: 'content_filter', latencyMs: 50 }),
+  ];
+  const s = summarize(rows);
+
+  it('per-intent precision and recall, by hand: a message with no valid answer is a recall miss and no precision answer', () => {
+    // order_status: support 3, answered "order_status" twice (one right) -> P 50, R 33.3
+    expect(s.perIntent.order_status).toEqual({ support: 3, predicted: 2, truePositives: 1, precisionPct: 50, recallPct: 33.3 });
+    // cancel_order: support 2, answered twice (one right) -> P 50, R 50
+    expect(s.perIntent.cancel_order).toEqual({ support: 2, predicted: 2, truePositives: 1, precisionPct: 50, recallPct: 50 });
+    // other: support 1, never answered "other" -> precision undefined (null), recall 0
+    expect(s.perIntent.other).toEqual({ support: 1, predicted: 0, truePositives: 0, precisionPct: null, recallPct: 0 });
+    expect(s.perIntent.menu_question.support).toBe(0);
+  });
+
+  it('failure rates are shares of ALL messages, with timeouts counted inside provider errors', () => {
+    expect(s.failureRates).toEqual({ refusalPct: 16.7, invalidOutputPct: 0, providerErrorPct: 16.7, timeoutPct: 16.7, budgetStopPct: 0 });
+  });
+
+  it('latency is over the requests that were sent: mean, nearest-rank p50 and p95, max', () => {
+    expect(s.latency).toEqual({ sent: 6, meanMs: 2525, p50Ms: 30, p95Ms: 15000, maxMs: 15000 });
+  });
+
+  it('a budget stop is reported apart and is not part of the latency', () => {
+    const stopped = summarize([...rows, { ...row('other', undefined, { outcome: 'budget_stop', latencyMs: 0 }) }]);
+    expect(stopped.latency.sent).toBe(6);
+    expect(stopped.failureRates.budgetStopPct).toBe(14.3);
+  });
+});
+
+describe('pairedComparison', () => {
+  const mk = (texts: string[], right: boolean[]): EvalRow[] => texts.map((t, i) => ({ text: t, expected: 'other', lang: 'en', hard: false, outcome: 'ok', predicted: right[i] ? 'other' : 'cancel_order', correct: right[i]!, latencyMs: 1, inputTokens: 0, outputTokens: 0, costUsd: 0 }));
+  const T = ['a', 'b', 'c', 'd', 'e'];
+  it('counts both right, only the first right, only the second right, both wrong', () => {
+    expect(pairedComparison(mk(T, [true, true, true, false, false]), mk(T, [true, false, false, true, false]))).toEqual({ n: 5, bothCorrect: 1, aOnly: 2, bOnly: 1, bothWrong: 1 });
+  });
+  it('refuses messages that differ or are in another order: such a comparison would mean nothing', () => {
+    expect(() => pairedComparison(mk(T, [true, true, true, true, true]), mk(['a', 'b', 'c', 'e', 'd'], [true, true, true, true, true]))).toThrow(/same messages/);
+    expect(() => pairedComparison(mk(T, [true, true, true, true, true]), mk(T.slice(1), [true, true, true, true]))).toThrow(/same messages/);
   });
 });

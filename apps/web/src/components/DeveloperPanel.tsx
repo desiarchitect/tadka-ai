@@ -10,34 +10,24 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ diagnostics }) =
 
   return (
     <aside className={`dev-panel-card ${isOpen ? 'open' : ''}`} aria-labelledby="dev-panel-heading">
-      <div
+      <button
+        type="button"
         className="dev-toggle-header"
         onClick={() => setIsOpen(!isOpen)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setIsOpen(!isOpen);
-          }
-        }}
         aria-expanded={isOpen}
+        aria-controls="dev-panel-body"
       >
-        <div className="dev-title" id="dev-panel-heading">
+        <span className="dev-title" id="dev-panel-heading">
           <span aria-hidden="true">&#128295;</span>
           <span>Developer Demonstration Panel (Real Backend Telemetry)</span>
-        </div>
-        <button
-          type="button"
-          className="btn-sm"
-          aria-label={isOpen ? 'Collapse developer diagnostics' : 'Expand developer diagnostics'}
-        >
+        </span>
+        <span className="btn-sm dev-toggle-label" aria-hidden="true">
           {isOpen ? 'Collapse ▲' : 'Expand Diagnostics ▼'}
-        </button>
-      </div>
+        </span>
+      </button>
 
       {isOpen && (
-        <div className="dev-body">
+        <div className="dev-body" id="dev-panel-body">
           {!diagnostics ? (
             <p className="diag-value na">
               No API request dispatched yet. Submit an inquiry above to observe live backend telemetry.
@@ -119,7 +109,7 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ diagnostics }) =
                 </div>
 
                 {/* OpenTelemetry Trace ID */}
-                <div className="diag-item" style={{ gridColumn: 'span 2' }}>
+                <div className="diag-item diag-wide">
                   <span className="diag-label">OpenTelemetry Trace ID</span>
                   <span className="diag-value">
                     {diagnostics.traceId ? (
@@ -134,7 +124,7 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ diagnostics }) =
 
                 {/* Safe Error Code */}
                 {diagnostics.outcome === 'error' && (
-                  <div className="diag-item" style={{ gridColumn: 'span 2' }}>
+                  <div className="diag-item diag-wide">
                     <span className="diag-label">Backend Error Code</span>
                     <span className="diag-value error">
                       {diagnostics.errorCode ?? 'unknown_error'}

@@ -9,6 +9,7 @@
 // A model that answers in prose ("I can't help with that") is counted as invalid_output:
 // from the SDK's side that is indistinguishable from any other text that is not the schema.
 import { generateText, NoObjectGeneratedError, Output } from 'ai';
+import { classifyProviderError, safeErrorFields } from './errors.js';
 import type { ModelPort } from '../llm/types.js';
 import { IntentOutput, type Intent } from './intent.js';
 
@@ -26,14 +27,17 @@ export const SYSTEM_PROMPT = [
 ].join('\n');
 
 export type Usage = { inputTokens: number; outputTokens: number };
+// `reason` and `diag` exist for the operator's log, never for the client: a short category and class names, status
+// numbers and identifiers. They never hold provider text, the customer's message or the model's output.
+export type Diag = Record<string, string | number | undefined>;
 export type ClassifyResult =
   | { outcome: 'ok'; intent: Intent; usage: Usage }
-  | { outcome: 'refusal' | 'invalid_output' | 'provider_error'; usage?: Usage; reason?: string };
+  | { outcome: 'refusal' | 'invalid_output' | 'provider_error'; usage?: Usage; reason?: string; diag?: Diag };
 
 const usageOf = (u: { inputTokens?: number; outputTokens?: number } | undefined): Usage | undefined =>
   u ? { inputTokens: u.inputTokens ?? 0, outputTokens: u.outputTokens ?? 0 } : undefined;
 
-export async function classifyIntent({ model, providerOptions }: ModelPort, text: string): Promise<ClassifyResult> {
+export async function classifyIntent({ model, providerOptions }: ModelPort, text: string, opts: { abortSignal?: AbortSignal } = {}): Promise<ClassifyResult> {
   try {
     const result = await generateText({
       model,
@@ -43,20 +47,26 @@ export async function classifyIntent({ model, providerOptions }: ModelPort, text
       temperature: 0, // accepted only because the adapter sets reasoningEffort 'none'
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       maxRetries: 0, // a retry would spend budget silently; the caller sees the failure
+      abortSignal: opts.abortSignal, // a timeout or cancel must reach the provider call: a hung provider cannot hold the request
       // Chosen by the provider adapter in src/llm (no storage, no reasoning tokens). Opaque here.
       providerOptions,
     });
     const usage = usageOf(result.usage);
-    if (result.finishReason === 'content-filter') return { outcome: 'refusal', usage };
+    if (result.finishReason === 'content-filter') return { outcome: 'refusal', usage, reason: 'content_filter' };
     try {
       return { outcome: 'ok', intent: result.output.intent, usage: usage ?? { inputTokens: 0, outputTokens: 0 } };
     } catch {
-      return { outcome: 'invalid_output', usage };
+      return { outcome: 'invalid_output', usage, reason: 'no_valid_output' };
     }
   } catch (err) {
     if (NoObjectGeneratedError.isInstance(err)) {
-      return { outcome: err.finishReason === 'content-filter' ? 'refusal' : 'invalid_output', usage: usageOf(err.usage) };
+      const refused = err.finishReason === 'content-filter';
+      // The cause tells "not JSON" from "JSON of the wrong shape". Class names only, never the text.
+      const cause = (err.cause as { name?: string } | undefined)?.name;
+      return { outcome: refused ? 'refusal' : 'invalid_output', usage: usageOf(err.usage), reason: refused ? 'content_filter' : (cause ?? 'no_object'), diag: { finishReason: String(err.finishReason) } };
     }
-    return { outcome: 'provider_error', reason: err instanceof Error ? err.name : 'unknown' };
+    // Everything else is a failure to get an answer: classify it (timeout, auth, rate limit, unavailable...) for the log.
+    const code = classifyProviderError(err)?.message ?? ((err as { name?: string } | null)?.name === 'AbortError' ? 'aborted' : 'unexpected_error');
+    return { outcome: 'provider_error', reason: code, diag: safeErrorFields(err, code) };
   }
 }

@@ -44,7 +44,7 @@ Episode 3: conversation memory. Starts from `ep02-typed-tool-calling`.
 - `TurnOptions` (EP-3) now also carries `signal`: when the client goes away the whole turn is abandoned. `StopReason` has both `invalid_history` (EP-3) and `cancelled`.
 - `POST /assist/conversations/:id/messages` is model-spending on every turn, so it now has what `/assist/chat` got: customers only through the shared guard, the per-user limit (429), the turn is aborted on client disconnect (nothing is stored, and the response is not written), and a turn that did not answer is a non-2xx with `error` and the fixed fallback in `answer`. The failed turn is still stored, as before, so the history shows what the customer saw. `invalid_history` (nothing was sent to the provider) is a `409 invalid_history`.
 - `/assist/chat` and the conversation route are off in demo mode.
-- Tests: 542 (398 API, 13 fake provider, 131 web client).
+- Tests: 545 (401 API, 13 fake provider, 131 web client).
 
 ## ep02-typed-tool-calling - 2026-10-11
 
@@ -94,7 +94,7 @@ Episode 2: typed tool calling with server-side identity. Starts from `ep01-struc
 - The product UI from `ep01-product-ui` (orders, order details, restaurants and menus, payment, email/password sign-in, the EP-1 intent card and order-status lookup) is merged in.
 - An **Ask about your orders** card for `POST /assist/chat`: the question goes out as `{ text }` with the token and nothing else (no user id, order id or role; the server authorizes). It shows the answer (written by the server from tool results) apart from the tools that ran and how each ended. It does not show tool arguments or results because the API does not send them. A non-2xx is a failed turn: the page's own wording for each error code, with the tools that ran and the fixed fallback sentence labelled "not an answer"; `Retry-After` is used for 429. Responses are validated with zod. Cancel aborts the request (the server then abandons the turn). Switching customer aborts a question in flight and a late answer is ignored.
 - The capability list shows EP-0, EP-1 and EP-2 as available.
-- Tests: 500 (356 API, 13 fake provider, 131 web client).
+- Tests: 503 (359 API, 13 fake provider, 131 web client).
 
 ### Not verified (still open)
 - No live Foundry call has been made for this branch. The scripted provider proves server behaviour for failures; it is not evidence of live-model behaviour.
@@ -119,7 +119,7 @@ Episode 1: not every AI feature is an agent. Starts from `ep00-start`.
 - Spending guard for the evaluation: before each request it adds actual spend so far to a worst case for the next request and stops, without retrying, if the run cap (`EVAL_BUDGET_USD`, default 0.5) or the ledger cap (`M0_BUDGET_USD`) could be crossed. The worst case estimates input tokens as the UTF-8 byte length of the prompt (a conservative estimate that does not undercount Devanagari, not a guaranteed bound), adds a fixed overhead and the full output cap, prices input and output separately, and refuses a model with no configured price.
 - `test/boundaries.test.ts`: an import-graph check that `assist` reaches orders only through the public service.
 - Client (`apps/web`, no backend change): an **Intent classification** card for `POST /assist/intent` that shows the classification (label, and whether it came from the language model or the keyword rules; SIMULATED in demo mode) apart from the **next step** the server's code chose, with an explicit "classification only, does not read your orders" label and no confidence score (the API sends none). A **Check status (server lookup)** button on each order calls `GET /assist/order-status` and labels the answer as a direct lookup with no model. Responses are validated with zod. The capability list shows EP-1 as available. The product UI from `ep00-product-ui` (orders, details, menus, payment, sign-in) is carried in.
-- Tests: 337 (230 API, 13 fake provider, 94 web client).
+- Tests: 340 (233 API, 13 fake provider, 94 web client).
 - `RUNBOOK.md` section 6 (bash and PowerShell), README section, new troubleshooting rows.
 
 ### Changed
@@ -217,6 +217,11 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - On a clean checkout: `pnpm install --frozen-lockfile`, migrate, seed, `pnpm dev`, every command in `RUNBOOK.md`, typecheck, build, and 78 of 78 tests (the count at that time; see the remediation section for the current one).
 - The dry-run probe, and the live call to Microsoft Foundry `gpt-5.4-mini`.
 - The adapters through the real AI SDK providers against a stand-in for the network.
+
+### Fixed (follow-up to the EP-2 verification)
+- F-8: `Retry-After` is now in `Access-Control-Expose-Headers`, so a page on another origin can read how long to wait after a `429`. Before, the browser hid it and the page could only say "wait a moment".
+- O-2: an order id goes on a trace span (`tadka.order_id`) only after the order was found for the caller. The id a caller merely asked for (someone else's order, or an invented one) is never recorded, and the two cases leave identical traces. `inSpan` now passes the span to its callback so a service can add an attribute at that point.
+- Tests: 243 (157 API, 13 fake provider, 73 web client).
 
 ### Not in this branch
 - Chat, tools, RAG, the agent loop and refunds. They arrive in later episode branches.

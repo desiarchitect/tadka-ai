@@ -52,6 +52,7 @@ describe('CORS, trace headers, and assist triage route', () => {
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(res.headers['access-control-expose-headers']).toContain('x-trace-id');
     expect(res.headers['access-control-expose-headers']).toContain('x-request-id');
+    expect(res.headers['access-control-expose-headers']).toContain('retry-after'); // so a page can read a 429's wait time
   });
 
   it('responses include x-request-id', async () => {

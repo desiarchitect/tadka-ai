@@ -34,7 +34,7 @@ What you will see when it runs:
 | The naive tool leaking another customer's address, and the fix | Section 7 |
 | `POST /assist/chat`: a question answered with tools | Section 7 |
 | Conversations that remember, history trimmed by whole turns, a saved vegetarian preference | Section 8 |
-| 542 passing tests (398 API + 13 fake provider + 131 web client) | `pnpm test` |
+| 545 passing tests (401 API + 13 fake provider + 131 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: a model-written summary of old turns (the note is written by code), memory the model
 can write, tools that change anything, RAG, deleting all of a customer's data, and defences against prompt injection beyond
@@ -1003,7 +1003,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 398 API tests and 131 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 401 API tests and 131 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|
@@ -1044,6 +1044,7 @@ Expected: 13 fake-provider tests, 398 API tests and 131 web tests pass. Your dev
 | `conversation-failures.test.ts` (9) | `POST /assist/conversations/:id/messages` has the same protections as `/assist/chat`: provider failures, prose, the spending cap are 429/502/503/504 with a code, the fallback and no provider text, and the failed turn is still recorded; the per-user limit (401/403 use no quota, a limited turn never reaches the provider); an aborted HTTP request ends the turn and stores nothing; demo mode never calls the model |
 | `assist-conversations.test.ts` (13) | End to end: the follow-up works, and still works after a restart; `POST /assist/chat` stays single turn; a small budget drops whole old turns; another customer gets 404; two messages at once give one 409 and the loser stores nothing; delete; customers only; the memory routes; the vegetarian filter as a database query on every seeded menu; captured logs never contain the customer's text, the answer or order details, also when the provider fails; 503 without a model |
 | `cors-and-assist.test.ts` (8) | CORS preflight and exposed headers; a disallowed origin gets no CORS headers and no 500; the triage route's 401, 400, 200 and 503 |
+| `trace-order-ids.test.ts` (3) | A trace records an order id only for an order the caller owns: a foreign or invented id is never on a span, the two cases leave the same trace, and paying someone else's order records nothing |
 | `guard.test.ts` (7) | The shared guard for model-spending routes on a bare app: 401/403 never use quota, the limit is per verified user, each route has its own quota, Retry-After, the timeout signal |
 | `provider-mode.test.ts` (5) | The startup decision: demo never initialises the provider, live, off, and a chosen-but-incomplete provider is refused |
 | `assist-errors.test.ts` (15) | Provider failures (401, 403, 429, 500, 404, network, 504, bad output) become our own status and code; provider text, keys, resource names and the customer's message never reach the response or the log; a provider auth failure is not a 401; a hung call is cut off at the timeout and the model sees the abort |
@@ -1240,7 +1241,7 @@ your Azure resource group (not required to run the branch): an alert only notifi
 | The page says "Not signed in. The demo sign-in is switched off" | The client was built without `VITE_DEMO_LOGIN=1` (a production build) | Use `pnpm dev`, or build with `VITE_DEMO_LOGIN=1` |
 | The page says "This build has no API address" | A production build was made without `VITE_API_URL` | Rebuild with `VITE_API_URL` set to the API's address (for local use `http://localhost:3000`) |
 | `DEMO_MODE must be "1" or "0"` at start | `DEMO_MODE` has another value (`true`, `yes`) | Use `1`, `0` or leave it empty |
-| `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds |
+| `429 rate_limited` | More than `TRIAGE_RATE_LIMIT_PER_MIN` requests in a minute | Wait for `Retry-After` seconds (the header is exposed to browsers through CORS, so the page shows it) |
 | Tests fail to connect | The postgres container is not running | `docker compose up -d --wait` |
 
 ## 14. Teardown

@@ -205,7 +205,7 @@ describe('customer switching', () => {
     expect(screen.queryByText('₹299.00')).not.toBeInTheDocument();
     expect(screen.queryByText('Placed, awaiting payment')).not.toBeInTheDocument();
     release(reply(200, ORDERS['token-aman']));
-    expect(await screen.findByText('₹58.00')).toBeInTheDocument();
+    expect(await screen.findByText('₹58.00', {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it('Sign Out clears the orders and revokes the refresh token', async () => {

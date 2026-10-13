@@ -18,7 +18,7 @@ What you will see when it runs:
 | A React + Vite customer-facing visual client with developer telemetry panel | `http://localhost:5173` |
 | A fake payment provider you can make succeed, decline, time out or fail on demand | `http://localhost:4010` |
 | One request traced across services | Jaeger at `http://localhost:16686` |
-| 239 passing tests (154 API + 13 fake provider + 72 web client) | `pnpm test` |
+| 240 passing tests (154 API + 13 fake provider + 73 web client) | `pnpm test` |
 | One typed answer from a language model, from Microsoft Foundry or direct OpenAI | `pnpm probe:llm` (section 9) |
 
 What is **not** in this branch, on purpose: chat, tools, RAG, the agent loop, refunds. Those arrive in later episode branches.
@@ -478,7 +478,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 154 API tests and 72 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 154 API tests and 73 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|

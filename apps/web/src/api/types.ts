@@ -23,6 +23,8 @@ export type ApiDiagnostics = {
   userId?: string;
   modelId?: string;
   simulated?: boolean;
+  /** false: the call is known not to involve a model (sign-in). true or absent: a model may be involved and this endpoint does not say which one. */
+  modelInvolved?: boolean;
   tokenUsage?: {
     inputTokens?: number;
     outputTokens?: number;

@@ -92,7 +92,7 @@ export class ApiClient {
   }
 
   login(email: string, password: string, signal?: AbortSignal): Promise<Result<LoginResponse>> {
-    return this.post({ path: '/auth/login', body: { email, password }, signal, schema: LoginResponseSchema, describe: loginMessage });
+    return this.post({ path: '/auth/login', body: { email, password }, signal, schema: LoginResponseSchema, describe: loginMessage, onSuccess: () => ({ modelInvolved: false }) });
   }
 
   triage(message: string, accessToken: string | null, signal?: AbortSignal): Promise<Result<TriageResponse>> {

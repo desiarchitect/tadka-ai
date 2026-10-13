@@ -13,11 +13,16 @@ exactly as it is at the end of that episode, and `git diff ep01-...ep02-...` sho
 
 | Branch | Episode | Status |
 |---|---|---|
-| `ep00-start` | Baseline app (orders, auth, fake payment provider) plus one structured LLM call | in progress |
-| `ep01-structured-intent` | Deterministic order-status route, plus an LLM that only classifies free text into five labels, measured against keyword rules | in progress |
-| `ep02-typed-tool-calling` | Three read-only tools with identity from the token, an agent loop with hard limits and a spending guard, replies rendered from tool results | in progress |
-| `ep03-conversation-memory` | Conversations stored in Postgres and owned by the customer, history trimmed by whole turns within a byte budget, and an opt-in vegetarian preference applied by the app | in progress |
+| `ep00-start` | Baseline app (orders, auth, fake payment provider) plus one structured LLM call | built, CI green |
+| `ep01-structured-intent` | Deterministic order-status route, plus an LLM that only classifies free text into five labels, measured against keyword rules | built, CI green |
+| `ep02-typed-tool-calling` | Three read-only tools with identity from the token, an agent loop with hard limits and a spending guard, replies rendered from tool results | built, CI green |
+| `ep03-conversation-memory` | Conversations stored in Postgres and owned by the customer, history trimmed by whole turns within a byte budget, and an opt-in vegetarian preference applied by the app | built, CI green |
 | `ep04-...` to `ep12-...` | AI features, evals, safety, operations | not started |
+
+**Status.** "built, CI green" means the code and tests pass in CI on Node 24 and 26, the typed-tool and ownership
+checks were exercised against a real API and database, and the browser client was checked in a real browser.
+It does **not** mean the assistant has been run against a live model: every provider answer in that testing was a
+scripted stand-in. That run, and formal acceptance criteria, are still pending.
 
 Branch names are `epNN-short-topic`. A branch is added only when the episode's code and tests pass.
 

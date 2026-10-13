@@ -1,6 +1,6 @@
 import type { z } from 'zod';
-import { ErrorBodySchema, LoginResponseSchema, TriageResponseSchema } from './schema.js';
-import type { ApiDiagnostics, LoginResponse, TriageResponse } from './types.js';
+import { ErrorBodySchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, OrderStatusResponseSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
+import type { ApiDiagnostics, IntentResponse, LoginResponse, Menu, Order, OrderDetail, OrderStatusResponse, Restaurant, TriageResponse } from './types.js';
 
 // Where the API is. VITE_API_URL is compiled into the bundle, so it must be set when a production build is made.
 // The localhost default exists only for local development (`vite`, the tests): a production build that was made
@@ -32,8 +32,9 @@ export const isCancelled = (err: unknown): err is RequestCancelledError => err i
 
 type Result<T> = { data: T; diagnostics: ApiDiagnostics };
 type Call<T> = {
+  method?: 'GET' | 'POST';
   path: string;
-  body: unknown;
+  body?: unknown;
   token?: string | null;
   signal?: AbortSignal;
   schema: z.ZodType<T>;
@@ -57,6 +58,37 @@ const triageMessage = (status: number, code: string): string => {
   }
   if (status === 400) return 'Invalid message (it must be 1 to 500 characters).';
   if (status >= 500) return 'Server error processing triage request.';
+  return 'Request failed';
+};
+// Wording for the product-data calls (restaurants, menus, orders, payment). Also never the raw server text.
+const dataMessage = (status: number, code: string): string => {
+  if (status === 401) return 'Your session has ended. Please sign in again.';
+  if (status === 403) return 'You are not allowed to see that.';
+  if (status === 404) return 'That could not be found.';
+  if (status === 429) return 'Too many requests. Please wait a minute and try again.';
+  if (code === 'invalid_response') return 'The server sent a response this page could not understand.';
+  if (status >= 500) return 'The server had a problem. Please try again.';
+  return 'Request failed';
+};
+const payMessage = (status: number, code: string): string => {
+  if (status === 409) {
+    const now = /^order_is_(\w+)$/.exec(code)?.[1] ?? /^cannot_move_(\w+)_to_/.exec(code)?.[1];
+    if (code === 'order_changed_concurrently') return 'This order changed while you were paying. The list has been refreshed; nothing was charged twice.';
+    return now ? `This order is now ${now} and can no longer be paid.` : 'This order can no longer be paid.';
+  }
+  if (status === 402) return 'The payment was declined. You were not charged.';
+  if (status === 502) return 'We could not confirm the payment with the payment provider. Please check the order status before trying again.';
+  return dataMessage(status, code);
+};
+const intentMessage = (status: number, code: string): string => {
+  switch (code) {
+    case 'missing_token': case 'invalid_token': return 'Authentication required. Please sign in as a customer.';
+    case 'customers_only': case 'forbidden_role': return 'Only customer accounts can use the assistant.';
+    case 'rate_limited': return 'Too many requests. Please wait a minute and try again.';
+    case 'assistant_unavailable': return 'The classifier could not answer right now. Please try again.';
+    case 'invalid_request': return 'Invalid message (it must be 1 to 500 characters).';
+  }
+  if (status >= 500) return 'Server error while classifying the message.';
   return 'Request failed';
 };
 const loginMessage = (_status: number, code: string): string => (code === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed');
@@ -87,7 +119,47 @@ export class ApiClient {
     });
   }
 
-  private async post<T>(call: Call<T>): Promise<Result<T>> {
+  /** Classification only: one label from a fixed list. What happens next is chosen by server code, not the model. */
+  intent(text: string, accessToken: string | null, signal?: AbortSignal): Promise<Result<IntentResponse>> {
+    return this.send({
+      path: '/assist/intent', body: { text }, token: accessToken, signal, schema: IntentResponseSchema, describe: intentMessage,
+      onSuccess: (data) => ({ simulated: data.simulated }),
+    });
+  }
+
+  /** A plain lookup by the server (no model): the status of one order the caller owns. */
+  orderStatus(orderId: string, token: string, signal?: AbortSignal): Promise<Result<OrderStatusResponse>> {
+    return this.send({ method: 'GET', path: `/assist/order-status?orderId=${encodeURIComponent(orderId)}`, token, signal, schema: OrderStatusResponseSchema, describe: dataMessage });
+  }
+
+  logout(refreshToken: string, signal?: AbortSignal): Promise<Result<null>> {
+    return this.send({ path: '/auth/logout', body: { refreshToken }, signal, schema: NoContentSchema, describe: dataMessage });
+  }
+
+  restaurants(signal?: AbortSignal): Promise<Result<Restaurant[]>> {
+    return this.send({ method: 'GET', path: '/restaurants', signal, schema: RestaurantListSchema, describe: dataMessage });
+  }
+
+  menu(restaurantId: string, signal?: AbortSignal): Promise<Result<Menu>> {
+    return this.send({ method: 'GET', path: `/restaurants/${encodeURIComponent(restaurantId)}/menu`, signal, schema: MenuSchema, describe: dataMessage });
+  }
+
+  orders(token: string, signal?: AbortSignal): Promise<Result<Order[]>> {
+    return this.send({ method: 'GET', path: '/orders', token, signal, schema: OrderListSchema, describe: dataMessage });
+  }
+
+  order(orderId: string, token: string, signal?: AbortSignal): Promise<Result<OrderDetail>> {
+    return this.send({ method: 'GET', path: `/orders/${encodeURIComponent(orderId)}`, token, signal, schema: OrderDetailSchema, describe: dataMessage });
+  }
+
+  /** The server decides whether the order may be paid; the client only reports what it said. */
+  pay(orderId: string, token: string, signal?: AbortSignal): Promise<Result<Order>> {
+    return this.send({ path: `/orders/${encodeURIComponent(orderId)}/pay`, body: {}, token, signal, schema: OrderSchema, describe: payMessage });
+  }
+
+  private post<T>(call: Call<T>): Promise<Result<T>> { return this.send(call); }
+
+  private async send<T>(call: Call<T>): Promise<Result<T>> {
     if (call.signal?.aborted) throw new RequestCancelledError(); // cancelled before it started: nothing to send
     const started = performance.now();
     const controller = new AbortController();
@@ -111,9 +183,11 @@ export class ApiClient {
     };
 
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = {};
+      if ((call.method ?? 'POST') === 'POST') headers['Content-Type'] = 'application/json';
       if (call.token) headers['Authorization'] = `Bearer ${call.token}`;
-      const res = await fetch(`${this.baseUrl}${call.path}`, { method: 'POST', headers, body: JSON.stringify(call.body), signal: controller.signal });
+      const method = call.method ?? 'POST';
+      const res = await fetch(`${this.baseUrl}${call.path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(call.body ?? {}) } : {}), signal: controller.signal });
       const traceId = res.headers.get('x-trace-id');
       const requestId = res.headers.get('x-request-id');
       const common = { httpStatus: res.status, statusText: res.statusText, traceId, requestId };
@@ -124,7 +198,7 @@ export class ApiClient {
         return fail({ ...common, authenticated: res.status !== 401, errorCode: code, errorMessage: call.describe(res.status, code) });
       }
 
-      const parsed = call.schema.safeParse(await res.json().catch(() => null));
+      const parsed = call.schema.safeParse(res.status === 204 ? null : await res.json().catch(() => null));
       if (!parsed.success) {
         return fail({ ...common, authenticated: true, errorCode: 'invalid_response', errorMessage: 'The server sent a response this page could not understand.' });
       }

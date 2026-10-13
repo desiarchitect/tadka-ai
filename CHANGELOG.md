@@ -71,5 +71,10 @@ First branch. Starts from `main` (overview only). Baseline backend plus one stru
 - The dry-run probe, and the live call to Microsoft Foundry `gpt-5.4-mini`.
 - The adapters through the real AI SDK providers against a stand-in for the network.
 
+### Fixed (follow-up to the EP-2 verification)
+- F-8: `Retry-After` is now in `Access-Control-Expose-Headers`, so a page on another origin can read how long to wait after a `429`. Before, the browser hid it and the page could only say "wait a moment".
+- O-2: an order id goes on a trace span (`tadka.order_id`) only after the order was found for the caller. The id a caller merely asked for (someone else's order, or an invented one) is never recorded, and the two cases leave identical traces. `inSpan` now passes the span to its callback so a service can add an attribute at that point.
+- Tests: 243 (157 API, 13 fake provider, 73 web client).
+
 ### Not in this branch
 - Chat, tools, RAG, the agent loop and refunds. They arrive in later episode branches.

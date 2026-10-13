@@ -69,7 +69,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
-    exposedHeaders: ['x-trace-id', 'x-request-id'],
+    // retry-after: a page (another origin) can only read the 429 wait time if the browser is allowed to expose it.
+    exposedHeaders: ['x-trace-id', 'x-request-id', 'retry-after'],
   });
 
   app.addHook('onSend', async (req, reply) => {

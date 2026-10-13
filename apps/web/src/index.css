@@ -578,3 +578,13 @@ body {
 .capabilities { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; }
 .capabilities summary { cursor: pointer; font-weight: 600; }
 .capabilities summary:focus-visible { outline: 3px solid var(--border-focus); outline-offset: 2px; }
+
+/* ---- EP-2: tool steps ---- */
+.steps { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.steps li { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px dashed var(--border); padding: 4px 0; overflow-wrap: anywhere; }
+.tool-name { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.status-tool-ok { background: var(--status-success-bg); color: #14532d; }
+.status-tool-not_found { background: #e7e5e4; color: #44403c; }
+.status-tool-invalid_args, .status-tool-failed { background: var(--status-error-bg); color: #7f1d1d; }
+.chat-answer { white-space: pre-line; }
+.chat-failure { align-items: flex-start; flex-direction: column; }

@@ -47,7 +47,13 @@ Episode 2: typed tool calling with server-side identity. Starts from `ep01-struc
 - F-6: a turn that did not answer is no longer a `200`. The fixed fallback sentence stays in `answer`, and the body adds `error`, a machine-readable code: `429 provider_rate_limited` (with `Retry-After`), `502 provider_auth` / `provider_unavailable` / `provider_bad_output` / `provider_refused`, `504 provider_timeout` / `turn_timeout`, `503 budget_exhausted` / `backend_unavailable` / `provider_not_configured`. Provider text, prompts and credentials are never in the response, and only a safe subset is logged. Successful turns are unchanged.
 - O-1: the spending ledger stays fail-closed and now validates provider usage before recording it (not a number, infinite, negative, fractional, above explicit bounds, or above what the request could have used). A rejected figure is charged at the held estimate (never the wrong number, never zero) and blocks live calls until an operator clears it. A corrupt ledger file is refused, never treated as empty. New operator commands: `pnpm budget:status`, `budget:clear-halt` (reason and `--confirm`, evidence copy kept, event recorded) and `budget:start-over` (corrupt file only, explicit baseline from the provider's billing, original kept). Nothing resets the ledger automatically, including reaching the cap. `RUNBOOK` section 7, "Ledger recovery".
 - `record()` on the ledger takes optional per-request limits; `settle()` refuses nonsense figures; `settleUsage()` is the loop's way to settle.
-- Tests: 404 (356 API, 13 fake provider, 35 web client).
+- Tests: 404 (356 API, 13 fake provider, 35 web client) before the client work below.
+
+### Added (client, `apps/web`; no backend change)
+- The product UI from `ep01-product-ui` (orders, order details, restaurants and menus, payment, email/password sign-in, the EP-1 intent card and order-status lookup) is merged in.
+- An **Ask about your orders** card for `POST /assist/chat`: the question goes out as `{ text }` with the token and nothing else (no user id, order id or role; the server authorizes). It shows the answer (written by the server from tool results) apart from the tools that ran and how each ended. It does not show tool arguments or results because the API does not send them. A non-2xx is a failed turn: the page's own wording for each error code, with the tools that ran and the fixed fallback sentence labelled "not an answer"; `Retry-After` is used for 429. Responses are validated with zod. Cancel aborts the request (the server then abandons the turn). Switching customer aborts a question in flight and a late answer is ignored.
+- The capability list shows EP-0, EP-1 and EP-2 as available.
+- Tests: 497 (356 API, 13 fake provider, 128 web client).
 
 ### Not verified (still open)
 - No live Foundry call has been made for this branch. The scripted provider proves server behaviour for failures; it is not evidence of live-model behaviour.

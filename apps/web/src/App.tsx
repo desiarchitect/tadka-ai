@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, isCancelled, resolveApiBaseUrl } from './api/client.js';
-import type { ApiDiagnostics, IntentResponse, TriageResponse } from './api/types.js';
+import type { ApiDiagnostics, ChatFailure, ChatResponse, IntentResponse, TriageResponse } from './api/types.js';
 import { AuthStatus, type Identity } from './components/AuthStatus.js';
 import { Capabilities } from './components/Capabilities.js';
+import { ChatCard } from './components/ChatCard.js';
 import { CustomerView } from './components/CustomerView.js';
 import { DeveloperPanel } from './components/DeveloperPanel.js';
 import { IntentCard } from './components/IntentCard.js';
@@ -11,7 +12,7 @@ import { OrdersPanel } from './components/OrdersPanel.js';
 import { RestaurantsPanel } from './components/RestaurantsPanel.js';
 import { SideTabs } from './components/SideTabs.js';
 import { demoCredentials, demoLoginEnabled, type DemoUser } from './demo.js';
-import { HAS_INTENT } from './episode.js';
+import { HAS_INTENT, HAS_TOOLS } from './episode.js';
 import { useLoad } from './hooks/useLoad.js';
 
 export const NO_API_URL_MESSAGE = 'This build has no API address, so it cannot reach the server. Rebuild it with VITE_API_URL set, for example: VITE_API_URL=https://api.example.com pnpm --filter @tadka/web build';
@@ -27,8 +28,12 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [result, setResult] = useState<TriageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chatResult, setChatResult] = useState<ChatResponse | null>(null);
+  const [chatFailure, setChatFailure] = useState<{ message: string; detail: ChatFailure | null } | null>(null);
   const [intentResult, setIntentResult] = useState<IntentResponse | null>(null);
   const [intentError, setIntentError] = useState<string | null>(null);
+  // Which card started the request in flight (a sign-in is none of them). All forms lock while any request runs; only that card shows Cancel.
+  const [activeCard, setActiveCard] = useState<'triage' | 'intent' | 'chat' | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ApiDiagnostics | null>(null);
   // The assistant / sign-in request in flight, if any. Starting a new one or leaving the page cancels the old one.
@@ -46,10 +51,11 @@ export const App: React.FC = () => {
     setIsLoading(true);
     setError(null);
     setIntentError(null);
+    setChatFailure(null);
     return controller;
   };
   const end = (controller: AbortController) => {
-    if (inFlight.current === controller) { inFlight.current = null; setIsLoading(false); }
+    if (inFlight.current === controller) { inFlight.current = null; setIsLoading(false); setActiveCard(null); }
   };
   const failed = (err: unknown, fallback: string) => {
     const diag = (err as { diagnostics?: ApiDiagnostics }).diagnostics;
@@ -66,11 +72,14 @@ export const App: React.FC = () => {
     inFlight.current?.abort();
     inFlight.current = null;
     setIsLoading(false);
+    setActiveCard(null);
     setSession(null);
     setResult(null);
     setError(null);
     setIntentResult(null);
     setIntentError(null);
+    setChatResult(null);
+    setChatFailure(null);
     setDiagnostics(null);
     const old = refreshTokenRef.current;
     refreshTokenRef.current = null;
@@ -121,9 +130,11 @@ export const App: React.FC = () => {
 
   const handleTriageSubmit = async (message: string) => {
     const controller = begin();
+    setActiveCard('triage');
     setResult(null);
     try {
       const res = await apiClient.triage(message, session?.token ?? null, controller.signal);
+      if (controller.signal.aborted) return; // cancelled, or the customer was switched, while the answer was arriving
       setResult(res.data);
       setDiagnostics(res.diagnostics);
     } catch (err: unknown) {
@@ -134,12 +145,36 @@ export const App: React.FC = () => {
     }
   };
 
+  // EP-2: one question answered with tools. Authorization is the server's: the page sends the question and the token, nothing else.
+  // A non-2xx is a failed turn. It is shown as a failure (the page's own wording for the code), never as an answer.
+  const handleChatSubmit = async (text: string) => {
+    const controller = begin();
+    setActiveCard('chat');
+    setChatResult(null);
+    try {
+      const res = await apiClient.chat(text, session?.token ?? null, controller.signal);
+      if (controller.signal.aborted) return;
+      setChatResult(res.data);
+      setDiagnostics(res.diagnostics);
+    } catch (err: unknown) {
+      if (isCancelled(err)) return;
+      const diag = (err as { diagnostics?: ApiDiagnostics }).diagnostics;
+      if (diag) setDiagnostics(diag);
+      if (diag?.httpStatus === 401) { onUnauthorized(); return; }
+      setChatFailure({ message: (err as Error).message || 'Request failed', detail: (err as { failure?: ChatFailure }).failure ?? null });
+    } finally {
+      end(controller);
+    }
+  };
+
   // EP-1: classification only. The server returns a label and a next step it chose itself.
   const handleIntentSubmit = async (text: string) => {
     const controller = begin();
+    setActiveCard('intent');
     setIntentResult(null);
     try {
       const res = await apiClient.intent(text, session?.token ?? null, controller.signal);
+      if (controller.signal.aborted) return;
       setIntentResult(res.data);
       setDiagnostics(res.diagnostics);
     } catch (err: unknown) {
@@ -169,15 +204,28 @@ export const App: React.FC = () => {
         onSelectUser={selectDemoUser}
         onSignIn={(e, p) => void signIn(e, p)}
         onSignOut={() => { clearCustomerScope(); setAuthMessage(null); }}
-        isLoading={isLoading}
+        // Locked only while signing in. A question in flight does not lock it: switching customer aborts the question.
+        isLoading={isLoading && activeCard === null}
         message={authMessage}
       />
       <main className="app-main product-grid">
         <div className="col-main">
+          {HAS_TOOLS && (
+            <ChatCard
+              onSubmit={handleChatSubmit}
+              onCancel={handleCancel}
+              isLoading={isLoading}
+              activeRequest={activeCard === 'chat'}
+              result={chatResult}
+              failure={chatFailure}
+              unavailableReason={!apiConfigured ? NO_API_URL_MESSAGE : session || demoLogin ? null : 'Sign in to use the assistant.'}
+            />
+          )}
           <CustomerView
             onSubmit={handleTriageSubmit}
             onCancel={handleCancel}
             isLoading={isLoading}
+            activeRequest={activeCard === 'triage'}
             result={result}
             error={error}
             onReset={handleReset}
@@ -187,6 +235,7 @@ export const App: React.FC = () => {
             <IntentCard
               onSubmit={handleIntentSubmit}
               isLoading={isLoading}
+              activeRequest={activeCard === 'intent'}
               result={intentResult}
               error={intentError}
               unavailableReason={!apiConfigured ? NO_API_URL_MESSAGE : session || demoLogin ? null : 'Sign in to use the assistant.'}

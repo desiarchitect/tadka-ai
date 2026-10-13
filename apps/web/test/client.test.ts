@@ -216,6 +216,63 @@ describe('ApiClient EP-1 calls', () => {
   });
 });
 
+describe('ApiClient EP-2 chat', () => {
+  const ok = { answer: 'a', stopReason: 'answered', steps: [{ tool: 'get_order', status: 'ok' }] };
+  const resH = (status: number, body: unknown, headers: Record<string, string>) => ({ ...res(status, body), headers: new Headers({ 'x-request-id': 'r', ...headers }) });
+
+  it('sends only { text } and the token; a 200 is validated (unknown step status, missing steps: invalid_response)', async () => {
+    const f = vi.fn().mockResolvedValue(res(200, ok));
+    globalThis.fetch = f;
+    const out = await new ApiClient('http://x').chat('where is my order?', 'tok');
+    expect(JSON.parse(String((f.mock.calls[0]![1] as RequestInit).body))).toEqual({ text: 'where is my order?' });
+    expect(f.mock.calls[0]![0]).toBe('http://x/assist/chat');
+    expect(out.data.steps).toEqual([{ tool: 'get_order', status: 'ok' }]);
+    for (const bad of [{ ...ok, steps: [{ tool: 't', status: 'teleported' }] }, { answer: 'a', stopReason: 'x' }]) {
+      globalThis.fetch = vi.fn().mockResolvedValue(res(200, bad));
+      expect((await failure(new ApiClient('http://x').chat('q', 't')))?.diagnostics.errorCode).toBe('invalid_response');
+    }
+  });
+
+  it('a failed turn carries only validated fields on .failure, plus Retry-After', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(resH(429, { error: 'provider_rate_limited', answer: 'fallback', stopReason: 'provider_error', steps: [{ tool: 'get_order', status: 'ok' }], leak: 'SECRET' }, { 'retry-after': '7' }));
+    const err = (await failure(new ApiClient('http://x').chat('q', 't'))) as (Error & { diagnostics: ApiDiagnostics; failure?: Record<string, unknown> }) | null;
+    expect(err?.diagnostics.httpStatus).toBe(429);
+    expect(err?.failure).toEqual({ code: 'provider_rate_limited', answer: 'fallback', stopReason: 'provider_error', steps: [{ tool: 'get_order', status: 'ok' }], retryAfterSec: 7 });
+    expect(JSON.stringify(err?.failure)).not.toContain('SECRET');
+  });
+
+  it('a failure body that is not the contract leaves no .failure, and the message is still the client\'s own wording', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(502, 'oops', false));
+    const err = (await failure(new ApiClient('http://x').chat('q', 't'))) as (Error & { diagnostics: ApiDiagnostics; failure?: unknown }) | null;
+    expect(err?.failure).toBeUndefined();
+    expect(err?.message).toMatch(/Server error while answering/);
+  });
+
+  it.each([
+    [403, 'customers_only', /Only customer accounts/], [429, 'rate_limited', /asking too fast/], [400, 'invalid_request', /Invalid question/],
+    [503, 'assistant_not_configured', /not configured on this server/], [503, 'budget_exhausted', /spending guard/], [503, 'backend_unavailable', /could not fetch your data/],
+    [504, 'provider_timeout', /took too long/], [504, 'turn_timeout', /took too long/], [502, 'provider_bad_output', /usable answer/],
+  ])('%i %s has its own wording and never shows the code', async (status, code, message) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(res(status, { error: code }, false));
+    const err = await failure(new ApiClient('http://x').chat('q', 't'));
+    expect(err?.message).toMatch(message);
+    expect(err?.message).not.toContain(code);
+  });
+
+  it('the chat call waits longer than the default timeout (the server\'s own 504 must arrive first), but still has one', async () => {
+    const f = hangingFetch();
+    globalThis.fetch = f as unknown as typeof fetch;
+    const chat = new ApiClient('http://x', 60).chat('q', 't'); // the default timeout here is 60 ms
+    const outcome = await Promise.race([chat.then(() => 'done', () => 'rejected'), new Promise((r) => setTimeout(() => r('still waiting'), 300))]);
+    expect(outcome).toBe('still waiting');
+    expect((f.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(false);
+    const ac = new AbortController();
+    const p = new ApiClient('http://x', 60).chat('q', 't', ac.signal); ac.abort();
+    expect(isCancelled(await p.then(() => null, (e: unknown) => e))).toBe(true);
+    void chat.catch(() => undefined);
+  });
+});
+
 describe('which API address a build uses', () => {
   it('uses VITE_API_URL when it is set, in development and in production', () => {
     expect(resolveApiBaseUrl({ VITE_API_URL: 'https://api.example.com', DEV: false })).toBe('https://api.example.com');

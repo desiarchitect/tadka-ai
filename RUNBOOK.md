@@ -29,7 +29,7 @@ What you will see when it runs:
 | Keyword rules and an LLM compared on 40 frozen messages | `pnpm eval:intent` (section 6) |
 | The naive tool leaking another customer's address, and the fix | Section 7 |
 | `POST /assist/chat`: a question answered with tools | Section 7 |
-| 461 passing tests (356 API + 13 fake provider + 92 web client) | `pnpm test` |
+| 497 passing tests (356 API + 13 fake provider + 128 web client) | `pnpm test` |
 
 What is **not** in this branch, on purpose: conversations (each question stands alone), tools that change anything,
 RAG, and defences against prompt injection beyond labelling database text as data. Those arrive in later episode branches.
@@ -280,7 +280,8 @@ Open `http://localhost:5173` in any browser while `pnpm dev` is running:
 8. **Pay a seeded order**: Rahul has one `Placed` order (Spice Garden, ₹299.00). Click **Pay**: the server charges the fake payment provider and the order becomes `Confirmed`. A second payment for it is safe (the server answers with the same order, one payment row). Only that one order can be paid, and only once; to repeat the demo run `pnpm db:seed` again (section 7). If an order moved on while the page was open, the server answers 409 and the page says so and refreshes the list.
 9. **Switch customers**: **Sign in as Aman** aborts anything in flight, clears Rahul's orders, details and assistant result, then loads Aman's. The server decides what each token may see: asking for Rahul's order with Aman's token is a 404. Without the demo sign-in (a production build) use the email and password form (`rahul@tadka.test` / `Password123!`).
 10. **Classify an intent (EP-1)**: the **Intent classification** card sends your message to `POST /assist/intent`. The result has two parts, kept apart on screen: (1) the **classification**, one label, labelled as coming from the language model or from the keyword rules (`SIMULATED` in demo mode), and (2) the **next step**, chosen by server code from that label (for `order_status` the server reads your orders itself; the model never sees them). No confidence score is shown because the API sends none. **Check status (server lookup)** on an order calls `GET /assist/order-status` directly: no model is involved, and the page says so.
-11. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
+11. **Ask with tools (EP-2)**: the **Ask about your orders** card sends your question to `POST /assist/chat` (body `{ "text" }` only). The server's model chooses read-only tools; the server validates every call, runs it for *your* account and checks ownership. The page shows two separate things: the **answer**, which the server writes from the tool results (the model writes none of it), and **the tools the server ran** with how each ended (`ok`, `not found`, `rejected`, `failed`). Tool arguments and results are not sent by the API, so the page does not show them. This needs a real provider (section 12); with none, or in `DEMO_MODE=1`, the card says the assistant is not configured (503). A question that could not be answered (provider failure, timeout, spending guard, database failure, rate limit) is shown as a **failure** in the page's own words, with the tools that ran before it stopped, and the server's fixed fallback sentence labelled "not an answer". **Cancel** aborts the request and the server abandons the turn. Switching customer mid-question aborts it too.
+12. **Verify 401 Enforcement**: Click **Sign Out** in the active caller bar, then submit an inquiry. The UI displays an unauthenticated warning, and the Developer Panel shows `401 Unauthorized` with the safe error code `missing_token`.
 
 
 ### Recording a demo (the explicit opt-in)
@@ -854,7 +855,7 @@ pnpm typecheck     # TypeScript, both apps
 pnpm test          # needs the postgres container; drops and re-creates a separate tadka_test database
 ```
 
-Expected: 13 fake-provider tests, 356 API tests and 92 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
+Expected: 13 fake-provider tests, 356 API tests and 128 web tests pass. Your dev database is never touched. A few API and fake-provider tests start the real server process with the command from the app's `package.json` and stop it with SIGTERM, so they take several seconds.
 
 | File | What it proves |
 |---|---|

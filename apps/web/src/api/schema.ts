@@ -72,3 +72,11 @@ export const IntentResponseSchema = z.object({
   next: NextStepSchema,
 });
 export const OrderStatusResponseSchema = OrderRef;
+
+// ---- EP-2: /assist/chat ----
+export const CHAT_TOOL_STATUSES = ['ok', 'not_found', 'invalid_args', 'failed'] as const;
+const ChatStepSchema = z.object({ tool: z.string(), status: z.enum(CHAT_TOOL_STATUSES) });
+/** A 200: the server answered. `answer` is rendered by the server from tool results (the model writes none of it). Arguments and results of the tools are not sent. */
+export const ChatResponseSchema = z.object({ answer: z.string(), stopReason: z.string(), steps: z.array(ChatStepSchema) });
+/** A non-2xx: `error` is the machine-readable code. `answer` is the fixed fallback sentence, which is NOT an answer. The rate limiter sends `error` only. */
+export const ChatFailureBodySchema = z.object({ error: z.string(), answer: z.string().optional(), stopReason: z.string().optional(), steps: z.array(ChatStepSchema).optional() });

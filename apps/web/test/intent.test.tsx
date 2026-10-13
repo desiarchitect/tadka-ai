@@ -109,13 +109,12 @@ describe('EP-1 intent card', () => {
     expect(await screen.findByText('₹58.00')).toBeInTheDocument();
   });
 
-  it('the capability list says EP-1 is available in this build and EP-2 is not', async () => {
+  it('the capability list says EP-1 is available in this build', async () => {
     globalThis.fetch = api();
     render(<App />);
     await ready();
     fireEvent.click(screen.getByText('What can the assistant do in this build?'));
     expect(screen.getByText(/EP-1 · Structured intent/).parentElement).toHaveTextContent('Available');
-    expect(screen.getByText(/EP-2 · Tool lookup/).parentElement).toHaveTextContent('Not in this build');
   });
 });
 

@@ -5,6 +5,7 @@ import { shortId } from '../lib/format.js';
 type Props = {
   onSubmit: (text: string) => Promise<void>;
   isLoading: boolean;
+  activeRequest?: boolean;
   result: IntentResponse | null;
   error: string | null;
   /** Why the form is off (not signed in, no API address). */
@@ -25,7 +26,7 @@ const say = (s: string) => s.replace(/_/g, ' ');
  * the CLASSIFICATION (one label, from a model or from keyword rules) and the NEXT STEP, which server code chose from that label.
  * No confidence score is shown because the API sends none.
  */
-export const IntentCard: React.FC<Props> = ({ onSubmit, isLoading, result, error, unavailableReason = null }) => {
+export const IntentCard: React.FC<Props> = ({ onSubmit, isLoading, activeRequest = true, result, error, unavailableReason = null }) => {
   const [text, setText] = useState(SAMPLES[0]!.text);
   const locked = isLoading || Boolean(unavailableReason);
   const submit = (e: React.FormEvent) => { e.preventDefault(); if (!locked && text.trim()) void onSubmit(text.trim()); };
@@ -44,7 +45,7 @@ export const IntentCard: React.FC<Props> = ({ onSubmit, isLoading, result, error
         </div>
         <div className="form-footer" style={{ marginTop: '12px' }}>
           <span className="char-count">{text.length}/500 characters</span>
-          <button type="submit" className="btn-primary" disabled={locked || !text.trim()}>{isLoading ? 'Working…' : 'Classify intent →'}</button>
+          <button type="submit" className="btn-primary" disabled={locked || !text.trim()}>{isLoading && activeRequest ? 'Working…' : 'Classify intent →'}</button>
         </div>
       </form>
       {unavailableReason && <p className="diag-value na" role="status">{unavailableReason}</p>}

@@ -1,6 +1,6 @@
 import type { z } from 'zod';
-import { ErrorBodySchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, OrderStatusResponseSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
-import type { ApiDiagnostics, IntentResponse, LoginResponse, Menu, Order, OrderDetail, OrderStatusResponse, Restaurant, TriageResponse } from './types.js';
+import { ChatFailureBodySchema, ChatResponseSchema, ErrorBodySchema, IntentResponseSchema, LoginResponseSchema, MenuSchema, NoContentSchema, OrderDetailSchema, OrderListSchema, OrderSchema, OrderStatusResponseSchema, RestaurantListSchema, TriageResponseSchema } from './schema.js';
+import type { ApiDiagnostics, ChatFailure, ChatResponse, IntentResponse, LoginResponse, Menu, Order, OrderDetail, OrderStatusResponse, Restaurant, TriageResponse } from './types.js';
 
 // Where the API is. VITE_API_URL is compiled into the bundle, so it must be set when a production build is made.
 // The localhost default exists only for local development (`vite`, the tests): a production build that was made
@@ -42,7 +42,14 @@ type Call<T> = {
   describe: (status: number, code: string) => string;
   /** Extra diagnostics taken from a valid success response. */
   onSuccess?: (data: T) => Partial<ApiDiagnostics>;
+  /** Longer than the default for a call the server itself allows to run longer (the client must not give up first). */
+  timeoutMs?: number;
+  /** What the page may keep from a failed response's body (validated by the caller). Attached to the thrown error as `.failure`. */
+  onFailure?: (body: unknown, res: Response) => unknown;
 };
+
+/** The longest server turn is 20 s (DEFAULT_LOOP.deadlineMs). The client waits a little longer so the server's own 504 arrives first. */
+export const CHAT_TIMEOUT_MS = 25_000;
 
 // Application-owned wording for the error codes the API can send. The server text itself is never shown.
 const triageMessage = (status: number, code: string): string => {
@@ -91,6 +98,25 @@ const intentMessage = (status: number, code: string): string => {
   if (status >= 500) return 'Server error while classifying the message.';
   return 'Request failed';
 };
+// POST /assist/chat. Application wording for every code the route can send (see RUNBOOK section 7). The server text is never shown.
+const chatMessage = (status: number, code: string): string => {
+  switch (code) {
+    case 'missing_token': case 'invalid_token': return 'Authentication required. Please sign in as a customer.';
+    case 'customers_only': case 'forbidden_role': return 'Only customer accounts can use the assistant.';
+    case 'rate_limited': return 'You are asking too fast. Please wait a moment and try again.';
+    case 'invalid_request': return 'Invalid question (it must be 1 to 500 characters).';
+    case 'assistant_not_configured': return 'The tool-calling assistant is not configured on this server. Ask the operator to set up a model provider.';
+    case 'provider_not_configured': return 'No AI model is configured on the server.';
+    case 'provider_rate_limited': return 'The AI provider is busy right now. Please try again shortly.';
+    case 'provider_timeout': case 'turn_timeout': return 'The assistant took too long to answer. Please try again.';
+    case 'provider_auth': case 'provider_unavailable': return 'The AI provider could not answer right now. Please try again later.';
+    case 'provider_bad_output': case 'provider_refused': return 'The assistant could not produce a usable answer to that. Please rephrase, or check the Orders panel.';
+    case 'budget_exhausted': return 'The assistant is paused by its spending guard. An operator has to look at it before it can answer again.';
+    case 'backend_unavailable': return 'The assistant could not fetch your data right now. Please try again in a moment.';
+  }
+  if (status >= 500) return 'Server error while answering.';
+  return 'Request failed';
+};
 const loginMessage = (_status: number, code: string): string => (code === 'invalid_credentials' ? 'Invalid email or password' : 'Login failed');
 
 export class ApiClient {
@@ -132,6 +158,22 @@ export class ApiClient {
     return this.send({ method: 'GET', path: `/assist/order-status?orderId=${encodeURIComponent(orderId)}`, token, signal, schema: OrderStatusResponseSchema, describe: dataMessage });
   }
 
+  /**
+   * EP-2: one question answered with server-run, server-authorised tools. 200 is an answer. Any other status is a failed turn:
+   * the thrown error carries `.failure` ({ code, answer, stopReason, steps, retryAfterSec }) with only validated fields.
+   */
+  chat(text: string, accessToken: string | null, signal?: AbortSignal): Promise<Result<ChatResponse>> {
+    return this.send({
+      path: '/assist/chat', body: { text }, token: accessToken, signal, schema: ChatResponseSchema, describe: chatMessage, timeoutMs: CHAT_TIMEOUT_MS,
+      onFailure: (body, res): ChatFailure | undefined => {
+        const parsed = ChatFailureBodySchema.safeParse(body);
+        if (!parsed.success) return undefined;
+        const ra = Number(res.headers.get('retry-after'));
+        return { code: parsed.data.error, answer: parsed.data.answer, stopReason: parsed.data.stopReason, steps: parsed.data.steps ?? [], ...(Number.isFinite(ra) && ra > 0 ? { retryAfterSec: Math.ceil(ra) } : {}) };
+      },
+    });
+  }
+
   logout(refreshToken: string, signal?: AbortSignal): Promise<Result<null>> {
     return this.send({ path: '/auth/logout', body: { refreshToken }, signal, schema: NoContentSchema, describe: dataMessage });
   }
@@ -164,7 +206,8 @@ export class ApiClient {
     const started = performance.now();
     const controller = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeoutMs);
+    const timeoutMs = call.timeoutMs ?? this.timeoutMs;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     const onCallerAbort = () => controller.abort();
     if (call.signal?.aborted) controller.abort();
     else call.signal?.addEventListener('abort', onCallerAbort, { once: true });
@@ -193,9 +236,15 @@ export class ApiClient {
       const common = { httpStatus: res.status, statusText: res.statusText, traceId, requestId };
 
       if (!res.ok) {
-        const parsed = ErrorBodySchema.safeParse(await res.json().catch(() => null));
+        const raw = await res.json().catch(() => null);
+        const parsed = ErrorBodySchema.safeParse(raw);
         const code = parsed.success ? parsed.data.error : `http_${res.status}`;
-        return fail({ ...common, authenticated: res.status !== 401, errorCode: code, errorMessage: call.describe(res.status, code) });
+        const failure = call.onFailure?.(raw, res);
+        try {
+          return fail({ ...common, authenticated: res.status !== 401, errorCode: code, errorMessage: call.describe(res.status, code) });
+        } catch (e) {
+          throw failure ? Object.assign(e as Error, { failure }) : e;
+        }
       }
 
       const parsed = call.schema.safeParse(res.status === 204 ? null : await res.json().catch(() => null));
@@ -207,7 +256,7 @@ export class ApiClient {
       if ((err as { diagnostics?: ApiDiagnostics }).diagnostics) throw err;
       const none = { httpStatus: 0, traceId: null, requestId: null, authenticated: false };
       if (timedOut) {
-        return fail({ ...none, statusText: 'Timeout', errorCode: 'client_timeout', errorMessage: `No answer within ${Math.round(this.timeoutMs / 1000)} seconds. The request was stopped; please try again.` });
+        return fail({ ...none, statusText: 'Timeout', errorCode: 'client_timeout', errorMessage: `No answer within ${Math.round(timeoutMs / 1000)} seconds. The request was stopped; please try again.` });
       }
       if (call.signal?.aborted) throw new RequestCancelledError();
       return fail({ ...none, statusText: 'Network Error', errorCode: 'network_error', errorMessage: `Unable to reach the Tadka API at ${this.baseUrl}` });
